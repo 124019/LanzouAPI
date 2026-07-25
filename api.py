@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 # Copyright © 2026 BefidcOZ. All rights reserved.
+import json
 import re
 import requests
+import time
+import ast
 
 target = 'arm64-v8a'
 print(f'target: {target}')
@@ -22,6 +25,29 @@ headers = {
     'Sec-Fetch-Mode': 'cors',
     'Sec-Fetch-Site': 'same-origin',
 }
+headers_for_ajaxm = {
+    "Accept": "application/json, text/javascript, */*",
+    "Accept-Encoding": "gzip, deflate, br, zstd",
+    "Accept-Language": "zh-CN,zh-HK;q=0.9,zh;q=0.8,en;q=0.7,en-GB;q=0.6,en-US;q=0.5",
+    "Cache-Control": "max-age=0",
+    "Connection": "keep-alive",
+    "Content-Length": "154",
+    "Content-Type": "application/x-www-form-urlencoded",
+    "DNT": "1",
+    "Host": "wwbvc.lanzouv.com",
+    "Origin": "https://wwbvc.lanzouv.com",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cores",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+    "X-Requested-With": "XMLHttpRequest",
+    "sec-ch-ua": '"Not;A=Brand";v="8", "Chromium";v="150", "Microsoft Edge";v="150"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "sec-gpc": "1",
+} # Add Referer : https://wwbvc.lanzouv.com/fn?CG4HbQ9hAmYB...
 share_url = "https://wwbvc.lanzouv.com/b011m9azlg"
 response = requests.get(url=share_url, headers=headers)
 html = response.text
@@ -105,6 +131,61 @@ for item in file_list_response['text']:
         target_last_url = item['id']
 target_download_page = f"https://wwbvc.lanzouv.com/{target_last_url}"
 
-response = requests.get(headers=headers, url=target_download_page)
+session = requests.Session()
+session.headers.update(headers)
+response = session.get(target_download_page)
 download_page = response.text
 print(download_page)
+arg1 = str(re.findall(r"var\s+arg1\s*=\s*'([^']+)'", download_page)[0])
+print(f"arg1:{arg1}")
+cookies = json.loads(input('Cookies:'))
+session.cookies.update(cookies)
+download_page = session.get(target_download_page).text
+print(f"download_page: {download_page}")
+download_button_last_url = re.findall(r'src="(/fn[^"]+)"', download_page)[0]
+download_button_url = f"https://wwbvc.lanzouv.com{download_button_last_url}"
+print(f"download_button_url: {download_button_url}")
+download_button = session.get(download_button_url).text
+print(f"download_button: {download_button}")
+download_url_dict_last_url = re.findall(r"url : '(/ajaxm.+)'", download_button)[0]
+print(f"download_url_dict_last_url: {download_url_dict_last_url}")
+get_download_url_dict_url = f"https://wwbvc.lanzouv.com{download_url_dict_last_url}"
+print(f"get_download_url_dict_url: {get_download_url_dict_url}")
+action = re.findall(r"'action':\s*'([^']+)'", download_button)[0]
+ajaxdata = re.findall(r"var ajaxdata\s*=\s*'([^']+)';", download_button)[0]
+wp_sign = re.findall(r"var wp_sign\s*=\s*'([^']+)';", download_button)[0]
+kdns = int(re.findall(r"var kdns\s*=\s*(\d+);", download_button)[0])
+websign = re.findall(r"'websign':\s*'([^']+)'", download_button)[0]
+ves = int(re.findall(r"'ves':\s*(\d+)", download_button)[0])
+print(f"action: {action}")
+print(f"ajaxdata: {ajaxdata}")
+print(f"wp_sign: {wp_sign}")
+print(f"websign: {websign}")
+print(f"kdns: {kdns}")
+print(f"ves: {ves}")
+json_data = {
+    'action': action,
+    'websignkey': ajaxdata,
+    'signs': ajaxdata,
+    'sign': wp_sign,
+    'websign': websign,      # 使用提取值，若需固定 '2' 可改为 '2'
+    'kd': kdns,
+    'ves': ves
+} # May Not universally applicable
+print(f"json_data: {json_data}")
+
+session.headers.clear()
+session.headers.update(headers_for_ajaxm)
+referer_header = {"Referer": download_button_url}
+print(f"referer_header: {referer_header}")
+session.headers.update(referer_header)
+print("waiting...")
+time.sleep(2)
+response = session.post(url=get_download_url_dict_url, data=json_data)
+print(f"real headers:{response.request.headers}")
+str_download_url_dict = response.text
+print(f"str_download_url_dict: {str_download_url_dict}")
+download_url_dict = json.loads(str_download_url_dict)
+download_last_url = download_url_dict["url"]
+download_url = f"https://slssm.dmpdmp.com/file/{download_last_url}"
+print(download_url)
