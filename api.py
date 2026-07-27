@@ -108,7 +108,7 @@ if password:
     params['pwd'] = password
     print("params:", params)
 
-response = requests.post(api_url, headers=headers, data=params, params={'file': fid})
+response = requests.post(api_url, headers=headers, data=params)
 file_list_response = response.json()
 
 print("file_list_response:", file_list_response)
