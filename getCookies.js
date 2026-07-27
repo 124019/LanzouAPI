@@ -121,7 +121,7 @@ export default function getCookie(arg1){
                 0x7, 0x4, 0x11, 0x5, 0x3, 0x1c, 0x22, 0x25, 0xc, 0x24];
     var key = getKey(arg1);
     var cookieValue = generateWafCookie(arg1, order, key);
-    var cookie = 'acw_sc__v2=' + cookieValue + '; path=/; expires=' + new Date(Date.now()+3600000).toUTCString();
+    var cookie = 'acw_sc__v2=' + cookieValue + '; path=/'
     console.log('Generated Cookie:', cookie);
     return cookie;
 }
