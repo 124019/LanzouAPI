@@ -1,20 +1,21 @@
+特别说明：本文中存在以中、英文两种语言。若两种文本存在任何歧义或不一致之处，应以英文版本为准。
+Governing Language: This statement is made available in both Chinese and English. In the event of any ambiguity or inconsistency between the two versions, the English version shall prevail.
+
 本项目遵循双重许可声明
 
-1. 开源/非商业用途：遵循以下完整的 GNU LGPL v3.0 协议。
-2. 商业用途：请联系 oyzh124019@qq.com 获取商业授权。
-
-为避免歧义，最终生效以英文版本为主。
+1. 开源或非商业用途：若您以开源或非商业目的使用本软件，则必须遵守自由软件基金会发布的 GNU 宽通用公共许可证第 2.1 版本（LGPLv2.1）的全部条款。下文附有 LGPLv2.1 协议全文。
+2. 商业用途或其他不符合 LGPLv2.1 条款的使用：若您的使用情形属于商业用途，或虽非商业但不符合 LGPLv2.1 之适用条件，或您需要获得额外权利，则须另行取得商业许可。请通过邮箱 oyzh124019@qq.com 联系权利人BefidcOZ(GitHub@124019）获取商业授权。取得商业授权后，被许可人将不再受 LGPLv2.1 约束，转而适用另行提供的商业授权许可协议(Commercial License Agreement), 在 LGPLv2.1 协议以下另附有商业授权许可协议全文。
 
 This software is dual-licensed.
 
-1. For Open Source / Non-Commercial Use:
-You must use this software under the terms of the GNU Lesser General Public License version 3 (LGPLv3) , as published by the Free Software Foundation. A copy of the LGPLv3 license is included below.
+1. For Open-Source or Non-Commercial Use: 
+If you use this software for open-source or non-commercial purposes, you must do so under the terms and conditions of the GNU Lesser General Public License version 2.1 (LGPLv2.1) as published by the Free Software Foundation. The full text of the LGPLv2.1 is reproduced below.
 
-2. For Commercial Use:
-For commercial use that does not comply with the terms of the LGPLv3, or if you require additional rights, a separate commercial license is required. Please contact 124019（Befidc OZ） at oyzh124019@qq.com to obtain a commercial license.
+2. For Commercial Use or Other Use Not Complying with LGPLv2.1: 
+If your use is commercial, or if it does not fall within the permissible scope of LGPLv2.1, or if you require additional rights beyond those granted by LGPLv2.1, you must obtain a separate commercial license. Please contact the right holder BefidcOZ(GitHub@124019) at oyzh124019@qq.com to acquire such license. Upon obtaining a commercial license, the licensee shall no longer be bound by LGPLv2.1 and shall instead be governed by the Commercial License Agreement, the full text of the Commercial License Agreement is reproduced below the text of LGPLv2.1.
 
---- 以下是完整的 GNU LGPL v3.0 协议文本 ---
-GNU LESSER GENERAL PUBLIC LICENSE
+--- Below is the complete text of the GNU LGPL v2.1 license  以下为完整的 GNU LGPL v2.1 协议文本 ---
+                   GNU LESSER GENERAL PUBLIC LICENSE
                        Version 2.1, February 1999
 
  Copyright (C) 1991, 1999 Free Software Foundation, Inc.
@@ -518,3 +519,23 @@ necessary.  Here is a sample; alter the names:
   Ty Coon, President of Vice
 
 That's all there is to it!
+
+
+--- Below is the complete text of the Commercial License Agreement 以下为完整的商业授权许可协议文本 ---
+商业授权许可协议
+版权所有 © 2026 BefidcOZ(GitHub@124019)
+
+特此授予任何获得本软件及相关文档文件（“本软件”）商业授权的人使用、复制、修改、合并、发布、分发和/或销售本软件副本的权利，但须满足以下条件：
+
+上述版权声明及本许可声明应包含在本软件的所有副本或实质性部分中。
+
+本软件按“原样”提供，不作任何明示或暗示的保证，包括但不限于适销性、特定用途适用性和不侵权的保证。在任何情况下，作者或版权持有人均不对因本软件或使用或以其他方式处理本软件而引起的任何索赔、损害或其他责任负责，无论该责任是基于合同、侵权或其他原因，即使已被告知发生此类损害的可能性。
+
+The Commercial License Agreement
+Copyright © 2026 BefidcOZ(GitHub@124019)
+
+Permission is hereby granted to any person who has obtained a commercial license for this software and associated documentation files (the “Software”), to use, copy, modify, merge, publish, distribute, and/or sell copies of the Software, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
