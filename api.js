@@ -103,8 +103,20 @@ const response2 = await fetch(index2x_url, {
 if (!response2.ok) {
     throw new Error('Network response was not ok ' + response2.statusText);
 }
-const post2_data = await response2.text();
-console.log('post2_data:', post2_data);
+var index2x_data = await response2.text();
+console.log('index2x_data:', index2x_data);
+
+// process json
+const targetName = `app-${target}-release.apk`;
+var index2x_data = JSON.parse(index2x_data);
+for (const item of index2x_data.text) {
+    if (item.name_all === targetName) {
+        var targetLastUrl = item.id;
+        break;
+    }
+}
+const targetDownloadPage = `https://wwbvc.lanzouv.com/${targetLastUrl}`;
+console.log('targetDownloadPage:', targetDownloadPage);
 
 
 
