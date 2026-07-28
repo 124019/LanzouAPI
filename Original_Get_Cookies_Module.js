@@ -128,7 +128,7 @@ function getCookie(arg1) {
         return cookie;
 }
 
-//getCookie function v3
+//Newer version of getCookie function
 export default function getCookiex(arg1) {
     const KEY = '3000176000856006061501533003690027800375';
 
@@ -140,16 +140,27 @@ export default function getCookiex(arg1) {
     ];
 
     // Reorder
-    const u = order.map(pos => arg1[pos - 1]).join('');
+    const rearranged = [];
+    for (let i = 0; i < arg1.length; i++) {
+        for (let j = 0; j < order.length; j++) {
+            if (order[j] === i + 1) {
+                rearranged[j] = arg1[i];
+            }
+        }
+    }
+    const u = rearranged.join('');
 
     // XOR operation
     let result = '';
-    for (let i = 0; i < 40; i += 2) {
-        const xor = (parseInt(u.slice(i, i + 2), 16) ^ parseInt(KEY.slice(i, i + 2), 16));
-        result += xor.toString(16).padStart(2, '0');
+    for (let i = 0; i < u.length && i < KEY.length; i += 2) {
+        const xor = (parseInt(u.substring(i, i + 2), 16) ^ parseInt(KEY.substring(i, i + 2), 16)).toString(16);
+        result += xor.length === 1 ? '0' + xor : xor;
     }
 
-    return `acw_sc__v2=${result}; path=/`;
+    const cookieValue = result;
+    const cookie = 'acw_sc__v2=' + cookieValue + '; path=/';
+    console.log('Generated Cookie:', cookie);
+    return cookie;
 }
 
 // getCookie('your_input_string');

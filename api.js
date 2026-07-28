@@ -79,10 +79,12 @@ function createHTTPClient() {
 }
 // Create HTTP Client End
 
-// Key v3 Start
+// Key Start
 function getCookie(arg1) {
+    // 固定 key（从独立模块中获取）
     const KEY = '3000176000856006061501533003690027800375';
 
+    // 置换顺序（固定不变）
     const order = [
         0xf, 0x23, 0x1d, 0x18, 0x21, 0x10, 0x1, 0x26, 0xa, 0x9,
         0x13, 0x1f, 0x28, 0x1b, 0x16, 0x17, 0x19, 0xd, 0x6, 0xb,
@@ -90,17 +92,28 @@ function getCookie(arg1) {
         0x7, 0x4, 0x11, 0x5, 0x3, 0x1c, 0x22, 0x25, 0xc, 0x24
     ];
 
-    // Reorder
-    const u = order.map(pos => arg1[pos - 1]).join('');
+    // 重排
+    const rearranged = [];
+    for (let i = 0; i < arg1.length; i++) {
+        for (let j = 0; j < order.length; j++) {
+            if (order[j] === i + 1) {
+                rearranged[j] = arg1[i];
+            }
+        }
+    }
+    const u = rearranged.join('');
 
-    // XOR operation
+    // 异或
     let result = '';
-    for (let i = 0; i < 40; i += 2) {
-        const xor = (parseInt(u.slice(i, i + 2), 16) ^ parseInt(KEY.slice(i, i + 2), 16));
-        result += xor.toString(16).padStart(2, '0');
+    for (let i = 0; i < u.length && i < KEY.length; i += 2) {
+        const xor = (parseInt(u.substring(i, i + 2), 16) ^ parseInt(KEY.substring(i, i + 2), 16)).toString(16);
+        result += xor.length === 1 ? '0' + xor : xor;
     }
 
-    return `acw_sc__v2=${result}; path=/`;
+    const cookieValue = result;
+    const cookie = 'acw_sc__v2=' + cookieValue + '; path=/';
+    console.log('Generated Cookie:', cookie);
+    return cookie;
 }
 
 // Key End
