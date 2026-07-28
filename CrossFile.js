@@ -1,8 +1,11 @@
-import getCookie from './getCookies.js';
+import get_url from './api.js';
 
+const share_url = "https://wwbvc.lanzouv.com/b011m9azlg"; // Cloud
+const SoftwareTag = 'arm64-v8a'; // Local
+const pwd = "dtu2"; // Cloud
+const version_tag = ''; // Cloud
+const target_format = 'app-{SoftwareTag}-release.apk'; // Cloud
+//EXAMPLES FOR TESTING
 
-var arg1 = '5BC622E03F0AD657229EF4A7C9AA691639A0551D'; // Example argument
-
-let cookie = getCookie(arg1);
-console.log('cookies: ' + cookie);
-
+const url = await get_url(version_tag, SoftwareTag, target_format, pwd, share_url);
+console.log(url);
