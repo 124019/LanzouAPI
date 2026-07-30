@@ -3,11 +3,36 @@
 import json
 import re
 import requests
-import time
-import ast
 
-target = 'arm64-v8a'
-print(f'target: {target}')
+__version__ = "2.0.0"
+
+SoftwareTag = 'arm64'
+version_tag = '1.3.0-30-20260729'
+password = 'dtu2'
+target_name = f"PixelPlay-{version_tag}-{SoftwareTag}-release.apk"
+
+#//Key Start//
+def ky(arg1):
+    KEY = '3000176000856006061501533003690027800375'
+    order = [
+            0xf, 0x23, 0x1d, 0x18, 0x21, 0x10, 0x1, 0x26, 0xa, 0x9,
+            0x13, 0x1f, 0x28, 0x1b, 0x16, 0x17, 0x19, 0xd, 0x6, 0xb,
+            0x27, 0x12, 0x14, 0x8, 0xe, 0x15, 0x20, 0x1a, 0x2, 0x1e,
+            0x7, 0x4, 0x11, 0x5, 0x3, 0x1c, 0x22, 0x25, 0xc, 0x24
+    ]
+
+    order_fixed = [x-1 for x in order]
+    print(f'order_fixed: {order_fixed}')
+    u = ''.join(arg1[i] for i in order_fixed)
+    print(u)
+
+    result = ''
+    for i in range(0, 40, 2):
+        xor = int(u[i]+u[i+1], 16) ^ int(KEY[i]+KEY[i+1], 16)
+        result = result + hex(xor).removeprefix('0x')
+    return result
+#//Key End//
+
 #///PAGE1///
 
 # share_url = input("url: ")
@@ -26,19 +51,16 @@ headers = {
     'Sec-Fetch-Site': 'same-origin',
 }
 headers_for_ajaxm = {
-    "Accept": "application/json, text/javascript, */*",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
     "Accept-Encoding": "gzip, deflate, br, zstd",
     "Accept-Language": "zh-CN,zh-HK;q=0.9,zh;q=0.8,en;q=0.7,en-GB;q=0.6,en-US;q=0.5",
     "Cache-Control": "max-age=0",
     "Connection": "keep-alive",
-    "Content-Length": "154",
-    "Content-Type": "application/x-www-form-urlencoded",
     "DNT": "1",
     "Host": "wwbvc.lanzouv.com",
-    "Origin": "https://wwbvc.lanzouv.com",
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "cores",
-    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
     "Sec-Fetch-User": "?1",
     "Upgrade-Insecure-Requests": "1",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
@@ -46,7 +68,7 @@ headers_for_ajaxm = {
     "sec-ch-ua": '"Not;A=Brand";v="8", "Chromium";v="150", "Microsoft Edge";v="150"',
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"Windows"',
-    "sec-gpc": "1",
+    "sec-gpc": "1"
 } # Add Referer : https://wwbvc.lanzouv.com/fn?CG4HbQ9hAmYB...
 share_url = "https://wwbvc.lanzouv.com/b011m9azlg"
 response = requests.get(url=share_url, headers=headers)
@@ -94,16 +116,7 @@ params = { # Lanzou Cao Ni Ma De , Luan4 Da3 Yin3 Hao4 Ni Ma Si Le
 }
 print("params:", params)
 
-password = None #
-while True:
-    try:
-        password = str(input("password(if no password, press 'enter'): "))
-    except ValueError:
-        no_password = input("if no password:press 'enter',input anything to retry: ")
-        if no_password:
-            continue
-    break
-print("password:", password)
+
 if password:
     params['pwd'] = password
     print("params:", params)
@@ -125,20 +138,24 @@ else:
 # ///PAGE2///
 
 target_last_url = None #
-target_name = f"app-{target}-release.apk"
 for item in file_list_response['text']:
     if item['name_all'] == target_name:
         target_last_url = item['id']
 target_download_page = f"https://wwbvc.lanzouv.com/{target_last_url}"
 
 session = requests.Session()
-session.headers.update(headers)
+session.headers.update(headers_for_ajaxm)
 response = session.get(target_download_page)
 download_page = response.text
 print(download_page)
 arg1 = str(re.findall(r"var\s+arg1\s*=\s*'([^']+)'", download_page)[0])
 print(f"arg1:{arg1}")
-cookies = json.loads(input('Cookies:'))
+
+# Get Download Page
+acw_sc__v2 = ky(arg1)
+ks = "{" + f'"acw_sc__v2":"{acw_sc__v2}"' + ',"path":"/"}'
+cookies = json.loads(ks)
+print(f"cookies:{cookies}")
 session.cookies.update(cookies)
 download_page = session.get(target_download_page).text
 print(f"download_page: {download_page}")
@@ -179,8 +196,6 @@ session.headers.update(headers_for_ajaxm)
 referer_header = {"Referer": download_button_url}
 print(f"referer_header: {referer_header}")
 session.headers.update(referer_header)
-print("waiting...")
-time.sleep(2)
 response = session.post(url=get_download_url_dict_url, data=json_data)
 print(f"real headers:{response.request.headers}")
 str_download_url_dict = response.text
