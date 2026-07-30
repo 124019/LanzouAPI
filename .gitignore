@@ -1,5 +1,4 @@
 /.venv/
 /.vscode/
-/sessiontest.py
+/tests/
 /.idea
-/pytest.py/
