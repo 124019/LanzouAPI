@@ -1,5 +1,5 @@
 /*Copyright © 2026 BefidcOZ. All rights reserved.
-*version: 2.0.0/
+*version: 2.0.1/
 */
 
 function filename_format_replacement(version_tag, SoftwareTag, target_format) { 
@@ -114,24 +114,6 @@ function getCookie(arg1) {
 export default async function get_url(version_tag, SoftwareTag, target_format, pwd, share_url) {
     const targetName = filename_format_replacement(version_tag, SoftwareTag, target_format);
     const baseHeaders = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://wwbvc.lanzouv.com/{file_id}',
-        'Origin': 'https://wwbvc.lanzouv.com',
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-origin',
-    };
-    const ajaxHeaders = {
-        'User-Agent': baseHeaders['User-Agent'],
-        'X-Requested-With': 'XMLHttpRequest',
-        'Content-Type': 'application/x-www-form-urlencoded',
-    };
-    const headers_for_ajaxm = {
         "Accept": "application/json, text/javascript, */*",
         "Accept-Encoding": "gzip, deflate, br, zstd",
         "Accept-Language": "zh-CN,zh-HK;q=0.9,zh;q=0.8,en;q=0.7,en-GB;q=0.6,en-US;q=0.5",
@@ -152,6 +134,11 @@ export default async function get_url(version_tag, SoftwareTag, target_format, p
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": '"Windows"',
         "sec-gpc": "1",
+    };
+    const ajaxHeaders = {
+        'User-Agent': baseHeaders['User-Agent'],
+        'X-Requested-With': 'XMLHttpRequest',
+        'Content-Type': 'application/x-www-form-urlencoded',
     };
 
     // Cookies Manager
@@ -179,7 +166,7 @@ export default async function get_url(version_tag, SoftwareTag, target_format, p
     }
 
     // enter index page
-    const response1 = await client.get(share_url, { headers: baseHeaders });
+    const response1 = await client.get(share_url, { baseHeaders, 'Referer': share_url });
     const index_page = response1.data;
     console.log('index_page:', index_page);
 
@@ -303,7 +290,7 @@ export default async function get_url(version_tag, SoftwareTag, target_format, p
     console.log('postAjaxData:', postAjaxData);
 
     const finalHeaders = {
-        ...headers_for_ajaxm,
+        ...baseHeaders,
         'Referer': downloadButtonUrl
     };
 
