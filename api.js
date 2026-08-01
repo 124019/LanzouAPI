@@ -117,6 +117,7 @@ export default async function get_url(version_tag, SoftwareTag, target_format, p
         "Accept": "application/json, text/javascript, */*",
         "Accept-Encoding": "gzip, deflate, br, zstd",
         "Accept-Language": "zh-CN,zh-HK;q=0.9,zh;q=0.8,en;q=0.7,en-GB;q=0.6,en-US;q=0.5",
+        "Referer": share_url,
         "Cache-Control": "max-age=0",
         "Connection": "keep-alive",
         "Content-Type": "application/x-www-form-urlencoded",

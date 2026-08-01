@@ -4,6 +4,7 @@ import json
 import re
 import requests
 import time
+from email.utils import formatdate
 
 __version__ = "2.0.2-beta2"
 
@@ -164,28 +165,28 @@ def get_url(share_url, password, target_name):
     session = requests.Session()
     session.headers.update(headers)
     response = session.get(target_download_page)
+    session.headers.update({'Referer': target_download_page})
+    print(f"初始 URL: {response.url}")
+    print(f"响应头 Set-Cookie: {response.headers.get('Set-Cookie')}")
+    print(f"当前 Session Cookies: {session.cookies}")
+
     download_page = response.text
     print(download_page)
     arg1 = str(re.findall(r"var\s+arg1\s*=\s*'([^']+)'", download_page)[0])
     print(f"arg1:{arg1}")
 
     # Get Download Page
+    expire_str = formatdate(time.time() + 3600, usegmt=True)
     acw_sc__v2 = ky(arg1)
-    ks = "{" + f'"acw_sc__v2":"{acw_sc__v2}"' + ',"path":"/"}'
+    ks = "{" + f'"acw_sc__v2":"{acw_sc__v2}"' + f',"path":"/","expires":"{expire_str}"' + '}'
     cookies = json.loads(ks)
     print(f"cookies:{cookies}")
-    def arg1_fuck(session, cookies):
-        session.cookies.update(cookies)
-        download_page = session.get(target_download_page).text
-        print(f"download_page: {download_page}")
-        return download_page
-    for times in range(0,3):
-        try:
-            download_page = arg1_fuck(session, cookies)
-            a = str(re.findall(r"var\s+arg1\s*=\s*'([^']+)'", download_page)[0])
-            continue
-        except:
-            break
+    session.cookies.update(cookies)
+
+    print(f"目标 URL: {target_download_page}")
+    download_page = session.get(target_download_page).text
+    print(f"download_page: {download_page}")
+
     download_button_last_url = re.findall(r'src="(/fn[^"]+)"', download_page)[0]
     download_button_url = f"https://wwbvc.lanzouv.com{download_button_last_url}"
     print(f"download_button_url: {download_button_url}")
@@ -223,7 +224,6 @@ def get_url(share_url, password, target_name):
     referer_header = {"Referer": download_button_url}
     print(f"referer_header: {referer_header}")
     session.headers.update(referer_header)
-    time.sleep(1)
     try:
         response = session.post(url=get_download_url_dict_url, data=json_data)
         print(f"real headers:{response.request.headers}")
@@ -231,7 +231,6 @@ def get_url(share_url, password, target_name):
         print(f"str_download_url_dict: {str_download_url_dict}")
         download_url_dict = json.loads(str_download_url_dict)
     except:
-        time.sleep(1)
         response = session.post(url=get_download_url_dict_url, data=json_data)
         print(f"real headers:{response.request.headers}")
         str_download_url_dict = response.text
