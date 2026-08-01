@@ -3,11 +3,12 @@
 import json
 import re
 import requests
+import time
 
-__version__ = "2.0.1"
+__version__ = "2.0.2-beta"
 
 
-def get_url(password, target_name):
+def get_url(share_url, password, target_name):
     #//Key Start//
     def ky(arg1):
         KEY = '3000176000856006061501533003690027800375'
@@ -35,18 +36,25 @@ def get_url(password, target_name):
     # share_url = input("url: ")
 
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://wwbvc.lanzouv.com/{file_id}',
-        'Origin': 'https://wwbvc.lanzouv.com',
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-origin',
-    }
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept-Encoding": "gzip, deflate, br, zstd",
+        "Accept-Language": "zh-CN,zh-HK;q=0.9,zh;q=0.8,en;q=0.7,en-GB;q=0.6,en-US;q=0.5",
+        "Cache-Control": "max-age=0",
+        "Connection": "keep-alive",
+        "DNT": "1",
+        "Host": "wwbvc.lanzouv.com",
+        "Referer": share_url,
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+        "sec-ch-ua": '"Not;A=Brand";v="8", "Chromium";v="150", "Microsoft Edge";v="150"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-gpc": "1"
+    }# Add Referer : https://wwbvc.lanzouv.com/...
     headers_for_ajaxm = {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "Accept-Encoding": "gzip, deflate, br, zstd",
@@ -67,12 +75,25 @@ def get_url(password, target_name):
         "sec-ch-ua-platform": '"Windows"',
         "sec-gpc": "1"
     } # Add Referer : https://wwbvc.lanzouv.com/fn?CG4HbQ9hAmYB...
-    share_url = "https://wwbvc.lanzouv.com/b011m9azlg"
-    response = requests.get(url=share_url, headers=headers)
+    session = requests.Session()
+    session.headers.update(headers)
+    response = session.get(url=share_url)
     html = response.text
-    print(html)
+    print(f"index Page:{html}")
 
-    lx = int(re.findall(r"'lx':(.+),", html)[0])
+    try:
+        lx = int(re.findall(r"'lx':(.+),", html)[0])
+    except:
+        arg1 = str(re.findall(r"var\s+arg1\s*=\s*'([^']+)'", html)[0])
+        print(f"arg1:{arg1}")
+        acw_sc__v2 = ky(arg1)
+        ks = "{" + f'"acw_sc__v2":"{acw_sc__v2}"' + ',"path":"/"}'
+        cookies = json.loads(ks)
+        print(f"cookies:{cookies}")
+        session.cookies.update(cookies)
+        html = session.get(share_url).text
+        print(f"real index page:{html}")
+        lx = int(re.findall(r"'lx':(.+),", html)[0])
     up = int(re.findall(r"'up':(.+),", html)[0])
     ls = int(re.findall(r"'ls':(.+),", html)[0])
     rep = re.findall(r"'rep':(.+),", html)[0]
@@ -118,7 +139,7 @@ def get_url(password, target_name):
         params['pwd'] = password
         print("params:", params)
 
-    response = requests.post(api_url, headers=headers, data=params)
+    response = session.post(api_url, data=params)
     file_list_response = response.json()
 
     print("file_list_response:", file_list_response)
@@ -141,7 +162,7 @@ def get_url(password, target_name):
     target_download_page = f"https://wwbvc.lanzouv.com/{target_last_url}"
 
     session = requests.Session()
-    session.headers.update(headers_for_ajaxm)
+    session.headers.update(headers)
     response = session.get(target_download_page)
     download_page = response.text
     print(download_page)
@@ -153,9 +174,15 @@ def get_url(password, target_name):
     ks = "{" + f'"acw_sc__v2":"{acw_sc__v2}"' + ',"path":"/"}'
     cookies = json.loads(ks)
     print(f"cookies:{cookies}")
-    session.cookies.update(cookies)
-    download_page = session.get(target_download_page).text
-    print(f"download_page: {download_page}")
+    def arg1_fuck(session, cookies):
+        session.cookies.update(cookies)
+        download_page = session.get(target_download_page).text
+        print(f"download_page: {download_page}")
+        return download_page
+    for times in range(0,3):
+        download_page = arg1_fuck(session, cookies)
+        if not str(re.findall(r"var\s+arg1\s*=\s*'([^']+)'", download_page)[0]):
+            break
     download_button_last_url = re.findall(r'src="(/fn[^"]+)"', download_page)[0]
     download_button_url = f"https://wwbvc.lanzouv.com{download_button_last_url}"
     print(f"download_button_url: {download_button_url}")
@@ -182,24 +209,32 @@ def get_url(password, target_name):
         'websignkey': ajaxdata,
         'signs': ajaxdata,
         'sign': wp_sign,
-        'websign': websign,      # 使用提取值，若需固定 '2' 可改为 '2'
+        'websign': websign,
         'kd': kdns,
         'ves': ves
     } # May Not universally applicable
     print(f"json_data: {json_data}")
 
     session.headers.clear()
-    session.headers.update(headers_for_ajaxm)
+    session.headers.update(headers)
     referer_header = {"Referer": download_button_url}
     print(f"referer_header: {referer_header}")
     session.headers.update(referer_header)
-    response = session.post(url=get_download_url_dict_url, data=json_data)
-    print(f"real headers:{response.request.headers}")
-    str_download_url_dict = response.text
-    print(f"str_download_url_dict: {str_download_url_dict}")
-    download_url_dict = json.loads(str_download_url_dict)
+    time.sleep(1)
+    try:
+        response = session.post(url=get_download_url_dict_url, data=json_data)
+        print(f"real headers:{response.request.headers}")
+        str_download_url_dict = response.text
+        print(f"str_download_url_dict: {str_download_url_dict}")
+        download_url_dict = json.loads(str_download_url_dict)
+    except:
+        time.sleep(1)
+        response = session.post(url=get_download_url_dict_url, data=json_data)
+        print(f"real headers:{response.request.headers}")
+        str_download_url_dict = response.text
+        print(f"str_download_url_dict: {str_download_url_dict}")
+        download_url_dict = json.loads(str_download_url_dict)
     download_last_url = download_url_dict["url"]
     download_url = f"https://slssm.dmpdmp.com/file/{download_last_url}"
     print(download_url)
     return download_url
-
