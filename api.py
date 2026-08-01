@@ -5,7 +5,7 @@ import re
 import requests
 import time
 
-__version__ = "2.0.2-beta"
+__version__ = "2.0.2-beta2"
 
 
 def get_url(share_url, password, target_name):
@@ -180,8 +180,11 @@ def get_url(share_url, password, target_name):
         print(f"download_page: {download_page}")
         return download_page
     for times in range(0,3):
-        download_page = arg1_fuck(session, cookies)
-        if not str(re.findall(r"var\s+arg1\s*=\s*'([^']+)'", download_page)[0]):
+        try:
+            download_page = arg1_fuck(session, cookies)
+            a = str(re.findall(r"var\s+arg1\s*=\s*'([^']+)'", download_page)[0])
+            continue
+        except:
             break
     download_button_last_url = re.findall(r'src="(/fn[^"]+)"', download_page)[0]
     download_button_url = f"https://wwbvc.lanzouv.com{download_button_last_url}"
