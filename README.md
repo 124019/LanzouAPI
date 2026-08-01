@@ -18,8 +18,8 @@
 ## 全部版本
 
 ---
-- **JavaScript** 版本(调用示例参见example.js)
-- ~~Python 版本~~(尚处于开发中)
+- **JavaScript** 版本(测试中，调用示例参见 `example.js` )
+- **Python** 版本(测试中, 此为不稳定版本 ，调用示例参见 `example.py` )
 - **Kotlin** 版本(该版本由 [R3n_011](https://github.com/r3n011) 负责转译与长期维护)(该版本尚未组件化)
 
 ## JavaScript 版本运行环境：
