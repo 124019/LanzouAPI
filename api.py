@@ -6,7 +6,7 @@ import requests
 import time
 from email.utils import formatdate
 
-__version__ = "2.0.2-beta2"
+__version__ = "2.0.2-beta4"
 
 
 def get_url(share_url, password, target_name):
@@ -28,7 +28,7 @@ def get_url(share_url, password, target_name):
         result = ''
         for i in range(0, 40, 2):
             xor = int(u[i]+u[i+1], 16) ^ int(KEY[i]+KEY[i+1], 16)
-            result = result + hex(xor).removeprefix('0x')
+            result += format(xor, '02x')
         return result
     #//Key End//
 
