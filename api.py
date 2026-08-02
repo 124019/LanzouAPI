@@ -6,7 +6,7 @@ import requests
 import time
 from email.utils import formatdate
 
-__version__ = "2.0.2-beta4"
+__version__ = "2.0.3"
 
 
 def get_url(share_url, password, target_name):
@@ -56,31 +56,11 @@ def get_url(share_url, password, target_name):
         "sec-ch-ua-platform": '"Windows"',
         "sec-gpc": "1"
     }# Add Referer : https://wwbvc.lanzouv.com/...
-    headers_for_ajaxm = {
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-        "Accept-Encoding": "gzip, deflate, br, zstd",
-        "Accept-Language": "zh-CN,zh-HK;q=0.9,zh;q=0.8,en;q=0.7,en-GB;q=0.6,en-US;q=0.5",
-        "Cache-Control": "max-age=0",
-        "Connection": "keep-alive",
-        "DNT": "1",
-        "Host": "wwbvc.lanzouv.com",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Sec-Fetch-User": "?1",
-        "Upgrade-Insecure-Requests": "1",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
-        "X-Requested-With": "XMLHttpRequest",
-        "sec-ch-ua": '"Not;A=Brand";v="8", "Chromium";v="150", "Microsoft Edge";v="150"',
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"Windows"',
-        "sec-gpc": "1"
-    } # Add Referer : https://wwbvc.lanzouv.com/fn?CG4HbQ9hAmYB...
     session = requests.Session()
     session.headers.update(headers)
     response = session.get(url=share_url)
     html = response.text
-    print(f"index Page:{html}")
+    print(f"index Page:{html[0:400]}...")
 
     try:
         lx = int(re.findall(r"'lx':(.+),", html)[0])
@@ -98,25 +78,14 @@ def get_url(share_url, password, target_name):
     up = int(re.findall(r"'up':(.+),", html)[0])
     ls = int(re.findall(r"'ls':(.+),", html)[0])
     rep = re.findall(r"'rep':(.+),", html)[0]
-    print("lx:", lx)
-    print("up:", up)
-    print("ls:", ls)
     t_var = re.findall(r"'t'\s*:\s*(\w+)", html)[0]
     t_val = re.findall(rf"{t_var}\s*=\s*'(\d+)'", html)[0]
     k_var = re.findall(r"'k'\s*:\s*(\w+)", html)[0]
     k_val = re.findall(rf"{k_var}\s*=\s*'([a-f0-9]+)'", html)[0]
-    print("k_val:", k_val)
-    print("t_val:", t_val)
-    print("t_var:", t_var)
-    print("k_var:", k_val)
     fid = int(re.findall(r"'fid':(.+),", html)[0])
     uid = re.findall(r"'uid':'(.+)',", html)[0]
-    print("uid:", uid)
-    print("fid:", fid)
     pgs = int(re.findall(r"pgs =(.+);", html)[0])
-    print("pgs:", pgs)
     puid = re.findall(r"'puid':'(.+)',", html)[0]
-    print("puid:", puid)
 
     api_url = f"https://wwbvc.lanzouv.com/filemoreajax.php?file={fid}"
     print("api_url:", api_url)
@@ -166,12 +135,9 @@ def get_url(share_url, password, target_name):
     session.headers.update(headers)
     response = session.get(target_download_page)
     session.headers.update({'Referer': target_download_page})
-    print(f"初始 URL: {response.url}")
-    print(f"响应头 Set-Cookie: {response.headers.get('Set-Cookie')}")
-    print(f"当前 Session Cookies: {session.cookies}")
 
     download_page = response.text
-    print(download_page)
+    print(f"download_page: {download_page[0:400]}...")
     arg1 = str(re.findall(r"var\s+arg1\s*=\s*'([^']+)'", download_page)[0])
     print(f"arg1:{arg1}")
 
@@ -183,17 +149,16 @@ def get_url(share_url, password, target_name):
     print(f"cookies:{cookies}")
     session.cookies.update(cookies)
 
-    print(f"目标 URL: {target_download_page}")
     download_page = session.get(target_download_page).text
-    print(f"download_page: {download_page}")
+    print(f"download_page: {download_page[0:400]}...")
 
     download_button_last_url = re.findall(r'src="(/fn[^"]+)"', download_page)[0]
     download_button_url = f"https://wwbvc.lanzouv.com{download_button_last_url}"
     print(f"download_button_url: {download_button_url}")
     download_button = session.get(download_button_url).text
-    print(f"download_button: {download_button}")
+    # print(f"download_button: {download_button}")
+    # if you are using the VS Code,there may be an UnicodeEncodeError, so I comment it out. If you are using the PyCharm or other IDEs even Powershell, you can uncomment it to see the download_button page.
     download_url_dict_last_url = re.findall(r"url : '(/ajaxm.+)'", download_button)[0]
-    print(f"download_url_dict_last_url: {download_url_dict_last_url}")
     get_download_url_dict_url = f"https://wwbvc.lanzouv.com{download_url_dict_last_url}"
     print(f"get_download_url_dict_url: {get_download_url_dict_url}")
     action = re.findall(r"'action':\s*'([^']+)'", download_button)[0]
@@ -202,12 +167,6 @@ def get_url(share_url, password, target_name):
     kdns = int(re.findall(r"var kdns\s*=\s*(\d+);", download_button)[0])
     websign = re.findall(r"'websign':\s*'([^']+)'", download_button)[0]
     ves = int(re.findall(r"'ves':\s*(\d+)", download_button)[0])
-    print(f"action: {action}")
-    print(f"ajaxdata: {ajaxdata}")
-    print(f"wp_sign: {wp_sign}")
-    print(f"websign: {websign}")
-    print(f"kdns: {kdns}")
-    print(f"ves: {ves}")
     json_data = {
         'action': action,
         'websignkey': ajaxdata,
@@ -224,18 +183,11 @@ def get_url(share_url, password, target_name):
     referer_header = {"Referer": download_button_url}
     print(f"referer_header: {referer_header}")
     session.headers.update(referer_header)
-    try:
-        response = session.post(url=get_download_url_dict_url, data=json_data)
-        print(f"real headers:{response.request.headers}")
-        str_download_url_dict = response.text
-        print(f"str_download_url_dict: {str_download_url_dict}")
-        download_url_dict = json.loads(str_download_url_dict)
-    except:
-        response = session.post(url=get_download_url_dict_url, data=json_data)
-        print(f"real headers:{response.request.headers}")
-        str_download_url_dict = response.text
-        print(f"str_download_url_dict: {str_download_url_dict}")
-        download_url_dict = json.loads(str_download_url_dict)
+    response = session.post(url=get_download_url_dict_url, data=json_data)
+    print(f"real headers:{response.request.headers}")
+    str_download_url_dict = response.text
+    print(f"str_download_url_dict: {str_download_url_dict}")
+    download_url_dict = json.loads(str_download_url_dict)
     download_last_url = download_url_dict["url"]
     download_url = f"https://slssm.dmpdmp.com/file/{download_last_url}"
     print(download_url)
