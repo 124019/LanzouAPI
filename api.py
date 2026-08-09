@@ -6,7 +6,7 @@ import requests
 import time
 from email.utils import formatdate
 
-__version__ = "2.1.0-dev"
+__version__ = "2.1.3"
 
 
 def get_url(share_url, password, target_name):
@@ -137,7 +137,7 @@ def get_url(share_url, password, target_name):
     session.headers.update({'Referer': target_download_page})
 
     download_page = response.text
-    print(f"download_page: {download_page[0:400]}...")
+    print(f"download_page: {download_page}")
     arg1 = str(re.findall(r"var\s+arg1\s*=\s*'([^']+)'", download_page)[0])
     print(f"arg1:{arg1}")
 
@@ -192,4 +192,4 @@ def get_url(share_url, password, target_name):
     download_url = f"https://slssm.dmpdmp.com/file/{download_last_url}"
     print(download_url)
     print(f"cookies:{dict(session.cookies)}")
-    return download_url
+    return str({"download_url": download_url, "cookies": cookies})
