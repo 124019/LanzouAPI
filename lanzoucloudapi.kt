@@ -2,280 +2,84 @@ package com.theveloper.pixelplay.data.github
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import timber.log.Timber
+import java.io.BufferedReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+import java.util.zip.GZIPInputStream
+import java.util.zip.InflaterInputStream
 
 /**
  * 蓝奏云直链解析 API
  *
- * 基于 Python 版 lanzouAPI (v2.0.3) 转译。
- * 实现了 acw_sc__v2 cookie 生成算法以绕过反爬机制。
+ * 用于从蓝奏云分享链接获取真实下载 URL。
+ * 对齐 LanzouAPI (api.py v2.0.2-beta2 / api.js v2.0.1，调用示例见 example.py) 最新算法：
+ *   - acw_sc__v2 cookie v3：由下载页 `arg1`（40 位十六进制）按 order 表重排后与 KEY 逐字节 XOR 生成
+ *   - filemoreajax.php 文件列表：POST 分享页参数获取文件清单（zt==1）
+ *   - 逐文件走下载页（arg1 → cookie（含 path/expires）→ /fn → /ajaxm）拿到硬编码域名直链 `https://slssm.dmpdmp.com/file/{url}`
+ *   - PAGE2 每个文件使用独立会话（清空 PAGE1 cookie），对齐 Python 版独立 Session
  *
- * 流程：
- * 1. GET 分享页，若返回 arg1 反爬页则生成 acw_sc__v2 cookie 后重试
- * 2. 从 HTML 提取 JS 参数，POST filemoreajax.php 获取文件列表 JSON
- * 3. GET 文件下载页 → 提取 arg1 → 生成 cookie → 重试 → 提取 /fn 链接
- * 4. GET /fn 页 → 提取 ajax 参数 → POST /ajaxm → 从 JSON 取 dom+url 拼接直链
+ * 用法（对齐 example.py）：
+ *   - getUrl(shareUrl, password, targetName)  → 精确指定文件名，返回单个直链
+ *   - resolveShare(shareUrl, password)        → 列出分享内全部文件
  */
 class LanzouCloudApi {
 
     private companion object {
-        // 蓝奏云反爬 KEY（硬编码）
+        // 蓝奏云反爬 KEY（硬编码在 JS 中）
         private const val ACW_KEY = "3000176000856006061501533003690027800375"
 
-        // arg1 字符重排序表（Python 版 order 各元素减 1）
+        // 数组重排序表（v3，40 个 1-based 十六进制位置）
         private val ACW_ORDER = intArrayOf(
-            14, 34, 28, 23, 32, 15, 0, 37, 9, 8,
-            18, 30, 39, 26, 21, 22, 24, 12, 5, 10,
-            38, 17, 19, 7, 13, 20, 31, 25, 1, 29,
-            6, 3, 16, 4, 2, 27, 33, 36, 11, 35
+            0xf, 0x23, 0x1d, 0x18, 0x21, 0x10, 0x1, 0x26, 0xa, 0x9,
+            0x13, 0x1f, 0x28, 0x1b, 0x16, 0x17, 0x19, 0xd, 0x6, 0xb,
+            0x27, 0x12, 0x14, 0x8, 0xe, 0x15, 0x20, 0x1a, 0x2, 0x1e,
+            0x7, 0x4, 0x11, 0x5, 0x3, 0x1c, 0x22, 0x25, 0xc, 0x24
         )
 
-        private const val USER_AGENT =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0"
+        // UA（与参考 api.py 一致的 Edge 桌面 UA）
+        private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0"
 
+        // 请求超时
         private const val CONNECT_TIMEOUT = 15000
-        private const val READ_TIMEOUT = 15000
+        private const val READ_TIMEOUT = 20000
     }
 
     data class LanzouFileInfo(
         val fileName: String,
         val fileSize: String,
         val downloadUrl: String,
-        val versionName: String? = null  // 从文件名解析的版本号
-    )
-
-    private data class FileEntry(
-        val id: String,
-        val name: String,
-        val size: String
-    )
-
-    private data class FileListParams(
-        val lx: Int,
-        val up: Int,
-        val ls: Int,
-        val rep: String,
-        val t: String,
-        val k: String,
-        val fid: Int,
-        val uid: String,
-        val pgs: Int,
-        val puid: String
+        val versionName: String? = null,  // 从文件名解析的版本号
+        val cookie: String = "",  // 解析会话的 Cookie（下载直链时必需，否则命中人机验证页）
+        val referer: String = ""  // 下载直链所需的 Referer（蓝奏云分享页）
     )
 
     /**
      * 从文件名解析版本号
-     * 支持格式：PixelPlay-1.2.3-28-20260729-release.apk
+     * 支持格式：PixelPlay-{versionName}-{versionCode}-{date}-arm64.apk
+     *         或：PixelPlay-{versionName}-{versionCode}-{date}-universal.apk
+     *         或：PixelPlay-{versionName}-{versionCode}-{date}-release.apk（对齐 example.py target_name）
      */
     fun parseVersionFromFileName(fileName: String): String? {
         val apkName = fileName.removeSuffix(".apk")
         // 匹配 PixelPlay-{versionName}-{versionCode}-{date}-{variant} 格式
-        val regex = Regex("""PixelPlay-([\d.]+)-\d+-\d+-\w+""")
+        val regex = Regex("""PixelPlay-([\d.]+)-\d+-\d+-(arm64|universal|release)""")
         val match = regex.find(apkName)
         return match?.groupValues?.get(1)
     }
 
     /**
-     * 生成 acw_sc__v2 cookie 值
-     *
-     * 算法（对应 Python 版 ky 函数）：
-     * 1. 按 ACW_ORDER 从 arg1 取字符重排
-     * 2. 与 ACW_KEY 逐字节（每两个 hex 字符）XOR
-     * 3. 拼接为 hex 字符串
-     */
-    private fun generateAcwCookieValue(arg1: String): String {
-        // 1. 按 ACW_ORDER 从 arg1 取字符重排
-        val u = StringBuilder()
-        for (pos in ACW_ORDER) {
-            if (pos < arg1.length) {
-                u.append(arg1[pos])
-            }
-        }
-
-        // 2. 与 KEY 逐字节（每两个 hex 字符）XOR
-        val result = StringBuilder()
-        var i = 0
-        while (i + 1 < u.length && i + 1 < ACW_KEY.length) {
-            val a = u.substring(i, i + 2).toInt(16)
-            val b = ACW_KEY.substring(i, i + 2).toInt(16)
-            result.append((a xor b).toString(16).padStart(2, '0'))
-            i += 2
-        }
-        return result.toString()
-    }
-
-    /**
-     * 从 HTML 中提取 arg1（反爬参数）
-     */
-    private fun extractArg1(html: String): String? {
-        val pattern = Regex("""var\s+arg1\s*=\s*'([^']+)'""")
-        return pattern.find(html)?.groupValues?.get(1)
-    }
-
-    /**
-     * 从分享页 HTML 提取 POST filemoreajax.php 所需参数
-     */
-    private fun extractFileListParams(html: String): FileListParams? {
-        return try {
-            val lx = Regex("""'lx':(\d+),""").find(html)?.groupValues?.get(1)?.toIntOrNull() ?: return null
-            val up = Regex("""'up':(\d+),""").find(html)?.groupValues?.get(1)?.toIntOrNull() ?: return null
-            val ls = Regex("""'ls':(\d+),""").find(html)?.groupValues?.get(1)?.toIntOrNull() ?: return null
-
-            // rep 值带引号，去掉引号
-            val rep = Regex("""'rep':\s*'([^']*)'""").find(html)?.groupValues?.get(1) ?: return null
-
-            // t 是变量引用：'t':varName  →  varName = 'value'
-            val tVar = Regex("""'t'\s*:\s*(\w+)""").find(html)?.groupValues?.get(1) ?: return null
-            val tVal = Regex("""$tVar\s*=\s*'(\d+)'""").find(html)?.groupValues?.get(1) ?: return null
-
-            // k 可能是变量引用，也可能直接是值
-            val kVarMatch = Regex("""'k'\s*:\s*(\w+)""").find(html)
-            val kVal = if (kVarMatch != null) {
-                val kVar = kVarMatch.groupValues[1]
-                Regex("""$kVar\s*=\s*'([a-f0-9]+)'""").find(html)?.groupValues?.get(1)
-            } else {
-                // 兜底：查找 _h59t8 变量
-                Regex("""var\s+_h59t8\s*=\s*'([a-f0-9]+)'""", RegexOption.IGNORE_CASE)
-                    .find(html)?.groupValues?.get(1)
-            } ?: return null
-
-            val fid = Regex("""'fid':(\d+),""").find(html)?.groupValues?.get(1)?.toIntOrNull() ?: return null
-            val uid = Regex("""'uid':'([^']+)'""").find(html)?.groupValues?.get(1) ?: return null
-            val pgs = Regex("""pgs\s*=\s*(\d+)""").find(html)?.groupValues?.get(1)?.toIntOrNull() ?: return null
-            val puid = Regex("""'puid':'([^']+)'""").find(html)?.groupValues?.get(1) ?: return null
-
-            FileListParams(lx, up, ls, rep, tVal, kVal, fid, uid, pgs, puid)
-        } catch (e: Exception) {
-            Timber.w(e, "提取文件列表参数失败")
-            null
-        }
-    }
-
-    /**
-     * 解析 filemoreajax.php 返回的 JSON，提取文件列表
-     */
-    private fun parseFileListJson(json: String): List<FileEntry> {
-        val entries = mutableListOf<FileEntry>()
-
-        val ztMatch = Regex(""""zt"\s*:\s*(\d+)""").find(json)
-        if (ztMatch?.groupValues?.get(1) != "1") {
-            val infoMatch = Regex(""""info"\s*:\s*"([^"]*)"""").find(json)
-            Timber.w("蓝奏云文件列表获取失败: ${infoMatch?.groupValues?.get(1) ?: "未知"}")
-            return entries
-        }
-
-        // 提取 text 数组中每个文件对象
-        val objectPattern = Regex("""\{[^{}]*"name_all"[^{}]*\}""")
-        objectPattern.findAll(json).forEach { objMatch ->
-            val objStr = objMatch.value
-            val id = Regex(""""id"\s*:\s*"([^"]*)"""").find(objStr)?.groupValues?.get(1) ?: return@forEach
-            val name = Regex(""""name_all"\s*:\s*"([^"]*)"""").find(objStr)?.groupValues?.get(1) ?: return@forEach
-            val size = Regex(""""size"\s*:\s*"([^"]*)"""").find(objStr)?.groupValues?.get(1) ?: ""
-            entries.add(FileEntry(id, name, size))
-        }
-
-        Timber.d("从蓝奏云解析到 ${entries.size} 个文件")
-        return entries
-    }
-
-    /**
-     * 获取文件的真实下载直链（对应 Python 版 PAGE2）
-     *
-     * @param baseUrl 蓝奏云基础 URL（如 https://wwbvc.lanzn.com）
-     * @param shareUrl 分享链接（用作 Referer）
-     * @param fileId 文件 ID
-     * @param cookies cookie 存储
-     */
-    private fun getRealDownloadUrl(
-        baseUrl: String,
-        shareUrl: String,
-        fileId: String,
-        cookies: MutableMap<String, String>
-    ): String? {
-        val downloadPageUrl = "$baseUrl/$fileId"
-
-        // Step 1: GET 下载页，获取 arg1
-        var html = fetchGet(downloadPageUrl, shareUrl, cookies)
-        val arg1 = extractArg1(html) ?: run {
-            Timber.w("下载页未找到 arg1: $downloadPageUrl")
-            return null
-        }
-
-        // Step 2: 生成 acw_sc__v2 cookie
-        cookies["acw_sc__v2"] = generateAcwCookieValue(arg1)
-
-        // Step 3: 带 cookie 重新 GET 下载页
-        html = fetchGet(downloadPageUrl, downloadPageUrl, cookies)
-
-        // Step 4: 提取 /fn... 下载按钮链接
-        val fnMatch = Regex("""src="(/fn[^"]+)"""").find(html) ?: run {
-            Timber.w("下载页未找到 /fn 链接")
-            return null
-        }
-        val downloadButtonUrl = "$baseUrl${fnMatch.groupValues[1]}"
-
-        // Step 5: GET 下载按钮页
-        val buttonHtml = fetchGet(downloadButtonUrl, downloadPageUrl, cookies)
-
-        // Step 6: 提取 ajax 请求参数
-        val action = Regex("""'action':\s*'([^']+)'""").find(buttonHtml)?.groupValues?.get(1) ?: run {
-            Timber.w("未找到 action"); return null
-        }
-        val ajaxdata = Regex("""var\s+ajaxdata\s*=\s*'([^']+)';""").find(buttonHtml)?.groupValues?.get(1) ?: run {
-            Timber.w("未找到 ajaxdata"); return null
-        }
-        val wpSign = Regex("""var\s+wp_sign\s*=\s*'([^']+)';""").find(buttonHtml)?.groupValues?.get(1) ?: run {
-            Timber.w("未找到 wp_sign"); return null
-        }
-        val kdns = Regex("""var\s+kdns\s*=\s*(\d+);""").find(buttonHtml)?.groupValues?.get(1) ?: run {
-            Timber.w("未找到 kdns"); return null
-        }
-        val websign = Regex("""'websign':\s*'([^']+)'""").find(buttonHtml)?.groupValues?.get(1) ?: run {
-            Timber.w("未找到 websign"); return null
-        }
-        val ves = Regex("""'ves':\s*(\d+)""").find(buttonHtml)?.groupValues?.get(1) ?: run {
-            Timber.w("未找到 ves"); return null
-        }
-        val ajaxUrlPath = Regex("""url\s*:\s*'(\/ajaxm[^']+)'""").find(buttonHtml)?.groupValues?.get(1) ?: run {
-            Timber.w("未找到 ajaxm URL"); return null
-        }
-
-        val getDownloadUrlApi = "$baseUrl$ajaxUrlPath"
-
-        // Step 7: POST 获取下载链接 JSON
-        val postData = buildString {
-            append("action=").append(URLEncoder.encode(action, "UTF-8"))
-            append("&websignkey=").append(URLEncoder.encode(ajaxdata, "UTF-8"))
-            append("&signs=").append(URLEncoder.encode(ajaxdata, "UTF-8"))
-            append("&sign=").append(URLEncoder.encode(wpSign, "UTF-8"))
-            append("&websign=").append(URLEncoder.encode(websign, "UTF-8"))
-            append("&kd=").append(kdns)
-            append("&ves=").append(ves)
-        }
-
-        val downloadJson = fetchPost(getDownloadUrlApi, postData, downloadButtonUrl, cookies)
-
-        // Step 8: 从 JSON 提取 dom 和 url，拼接直链
-        val domMatch = Regex(""""dom"\s*:\s*"([^"]*)"""").find(downloadJson)
-        val urlMatch = Regex(""""url"\s*:\s*"([^"]*)"""").find(downloadJson)
-
-        if (domMatch != null && urlMatch != null) {
-            val finalUrl = "${domMatch.groupValues[1]}/file/${urlMatch.groupValues[1]}"
-            Timber.d("获取到蓝奏云直链: $finalUrl")
-            return finalUrl
-        }
-
-        Timber.w("下载链接 JSON 解析失败: $downloadJson")
-        return null
-    }
-
-    /**
      * 解析蓝奏云分享链接，获取所有文件的下载信息
      *
-     * @param shareUrl 分享链接（如 https://wwbvc.lanzn.com/b011m9azlg）
+     * @param shareUrl 分享链接（如 https://wwbvc.lanzouv.com/b011m9azlg）
      * @param password 提取密码（可选）
      * @return 文件信息列表
      */
@@ -285,73 +89,176 @@ class LanzouCloudApi {
     ): Result<List<LanzouFileInfo>> {
         return withContext(Dispatchers.IO) {
             try {
-                val baseUrl = getBaseUrl(shareUrl)
-                val cookies = mutableMapOf<String, String>()
+                val session = LanzouSession()
+                val files = mutableListOf<LanzouFileInfo>()
 
-                // Step 1: 访问分享页
-                var html = fetchGet(shareUrl, shareUrl, cookies)
-
-                // 检查是否命中反爬（页面含 arg1），若是则生成 cookie 后重试
-                val arg1 = extractArg1(html)
-                if (arg1 != null) {
-                    cookies["acw_sc__v2"] = generateAcwCookieValue(arg1)
-                    html = fetchGet(shareUrl, shareUrl, cookies)
-                }
-
-                // Step 2: 从 HTML 提取 POST 参数
-                val params = extractFileListParams(html)
-                if (params == null) {
-                    return@withContext Result.failure(Exception("无法从分享页提取文件列表参数"))
-                }
-
-                // Step 3: POST filemoreajax.php 获取文件列表 JSON
-                val apiUrl = "$baseUrl/filemoreajax.php?file=${params.fid}"
-                val postData = buildString {
-                    append("lx=").append(params.lx)
-                    append("&fid=").append(params.fid)
-                    append("&uid=").append(URLEncoder.encode(params.uid, "UTF-8"))
-                    append("&puid=").append(URLEncoder.encode(params.puid, "UTF-8"))
-                    append("&pg=").append(params.pgs)
-                    append("&rep=").append(URLEncoder.encode(params.rep, "UTF-8"))
-                    append("&t=").append(params.t)
-                    append("&k=").append(params.k)
-                    append("&up=").append(params.up)
-                    append("&ls=").append(params.ls)
-                    if (password != null) {
-                        append("&pwd=").append(URLEncoder.encode(password, "UTF-8"))
+                // ── PAGE1：进入分享页，提取文件列表参数 ──
+                var indexHtml = session.get(shareUrl, referer = shareUrl)
+                // 被反爬拦截时页面不含 'lx'，需先从 arg1 生成 acw_sc__v2 cookie 后重试
+                if (!indexHtml.contains("'lx'")) {
+                    val arg1 = Regex("""var\s+arg1\s*=\s*'([^']+)'""")
+                        .find(indexHtml)?.groupValues?.get(1)
+                    if (arg1 != null) {
+                        // Python 版：session.cookies.update({"acw_sc__v2": ky(arg1), "path": "/"})
+                        session.setCookie("acw_sc__v2", generateAcwCookieV3(arg1))
+                        session.setCookie("path", "/")
+                        indexHtml = session.get(shareUrl, referer = shareUrl)
                     }
                 }
 
-                val fileListJson = fetchPost(apiUrl, postData, shareUrl, cookies)
-                val fileEntries = parseFileListJson(fileListJson)
+                val host = session.lastHost ?: URL(shareUrl).host
+                val params = extractIndexParams(indexHtml)
 
-                if (fileEntries.isEmpty()) {
-                    return@withContext Result.success(emptyList())
+                // 拉取文件列表
+                val listForm = linkedMapOf<String, String>()
+                listForm["lx"] = params.lx.toString()
+                listForm["fid"] = params.fid.toString()
+                listForm["uid"] = params.uid
+                listForm["puid"] = params.puid
+                listForm["pg"] = params.pgs.toString()
+                listForm["rep"] = params.rep
+                listForm["t"] = params.t
+                listForm["k"] = params.k
+                listForm["up"] = params.up.toString()
+                listForm["ls"] = params.ls.toString()
+                if (!password.isNullOrEmpty()) listForm["pwd"] = password
+
+                val listJson = session.post(
+                    "https://$host/filemoreajax.php?file=${params.fid}",
+                    listForm,
+                    referer = shareUrl
+                )
+                val listObj = JSONObject(listJson)
+                if (listObj.optInt("zt") != 1) {
+                    throw Exception("获取文件列表失败: ${listObj.optString("info", listJson)}")
                 }
+                val text = listObj.optJSONArray("text") ?: JSONArray()
+                val fileEntries = mutableListOf<FileEntry>()
+                for (i in 0 until text.length()) {
+                    val item = text.optJSONObject(i) ?: continue
+                    fileEntries.add(
+                        FileEntry(
+                            id = item.optString("id"),
+                            name = item.optString("name_all"),
+                            size = item.optString("size")
+                        )
+                    )
+                }
+                Timber.d("Lanzou: found ${fileEntries.size} files")
 
-                // Step 4: 对每个文件获取真实下载直链
-                val files = mutableListOf<LanzouFileInfo>()
+                // ── PAGE2：逐文件解析真实下载直链 ──
                 for (entry in fileEntries) {
                     try {
-                        val downloadUrl = getRealDownloadUrl(baseUrl, shareUrl, entry.id, cookies)
+                        val downloadUrl = resolveSingleFile(session, host, entry, shareUrl)
                         if (downloadUrl != null) {
                             files.add(
                                 LanzouFileInfo(
                                     fileName = entry.name,
                                     fileSize = entry.size,
                                     downloadUrl = downloadUrl,
-                                    versionName = parseVersionFromFileName(entry.name)
+                                    versionName = parseVersionFromFileName(entry.name),
+                                    // ⚡ 携带解析会话的 Cookie 与 Referer，App 内下载直链时带上，
+                                    //    否则蓝奏云 CDN 直接返回人机验证 HTML 页导致下载失败
+                                    cookie = session.cookiesString(),
+                                    referer = shareUrl
                                 )
                             )
                         }
                     } catch (e: Exception) {
-                        Timber.w(e, "获取文件下载链接失败: ${entry.name}")
+                        Timber.w(e, "Lanzou: failed to resolve file: ${entry.name}")
                     }
                 }
 
                 Result.success(files)
             } catch (e: Exception) {
-                Timber.e(e, "解析蓝奏云分享链接失败")
+                Timber.e(e, "Lanzou: failed to resolve share")
+                Result.failure(e)
+            }
+        }
+    }
+
+    /**
+     * 精确获取指定文件名的直链（对齐 example.py 的 get_url(share_url, password, target_name)）
+     *
+     * @param shareUrl 分享链接（如 https://wwbvc.lanzouv.com/b011m9azlg）
+     * @param password 提取密码（可选）
+     * @param targetName 目标文件名（如 "PixelPlay-1.3.2-32-20260731-release.apk"）
+     * @return 该文件的真实下载直链；未找到目标文件时返回失败（附可用文件清单）
+     */
+    suspend fun getUrl(
+        shareUrl: String,
+        password: String? = null,
+        targetName: String
+    ): Result<String> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val session = LanzouSession()
+
+                // ── PAGE1：进入分享页，提取文件列表参数 ──
+                var indexHtml = session.get(shareUrl, referer = shareUrl)
+                if (!indexHtml.contains("'lx'")) {
+                    val arg1 = Regex("""var\s+arg1\s*=\s*'([^']+)'""")
+                        .find(indexHtml)?.groupValues?.get(1)
+                    if (arg1 != null) {
+                        session.setCookie("acw_sc__v2", generateAcwCookieV3(arg1))
+                        session.setCookie("path", "/")
+                        indexHtml = session.get(shareUrl, referer = shareUrl)
+                    }
+                }
+
+                val host = session.lastHost ?: URL(shareUrl).host
+                val params = extractIndexParams(indexHtml)
+
+                val listForm = linkedMapOf<String, String>()
+                listForm["lx"] = params.lx.toString()
+                listForm["fid"] = params.fid.toString()
+                listForm["uid"] = params.uid
+                listForm["puid"] = params.puid
+                listForm["pg"] = params.pgs.toString()
+                listForm["rep"] = params.rep
+                listForm["t"] = params.t
+                listForm["k"] = params.k
+                listForm["up"] = params.up.toString()
+                listForm["ls"] = params.ls.toString()
+                if (!password.isNullOrEmpty()) listForm["pwd"] = password
+
+                val listJson = session.post(
+                    "https://$host/filemoreajax.php?file=${params.fid}",
+                    listForm,
+                    referer = shareUrl
+                )
+                val listObj = JSONObject(listJson)
+                if (listObj.optInt("zt") != 1) {
+                    throw Exception("获取文件列表失败: ${listObj.optString("info", listJson)}")
+                }
+                val text = listObj.optJSONArray("text") ?: JSONArray()
+                val fileEntries = mutableListOf<FileEntry>()
+                for (i in 0 until text.length()) {
+                    val item = text.optJSONObject(i) ?: continue
+                    fileEntries.add(
+                        FileEntry(
+                            id = item.optString("id"),
+                            name = item.optString("name_all"),
+                            size = item.optString("size")
+                        )
+                    )
+                }
+
+                // 对齐 api.py：按 name_all == target_name 精确匹配目标文件
+                val target = fileEntries.firstOrNull { it.name == targetName }
+                if (target == null) {
+                    val available = fileEntries.joinToString(", ") { it.name }
+                    throw Exception("Not Found: '$targetName' in file list. Available: $available")
+                }
+
+                // ── PAGE2：独立会话解析目标文件直链 ──
+                val downloadUrl = resolveSingleFile(session, host, target, shareUrl)
+                if (downloadUrl == null) {
+                    throw Exception("无法解析目标文件下载直链: $targetName")
+                }
+                Result.success(downloadUrl)
+            } catch (e: Exception) {
+                Timber.e(e, "Lanzou: failed to get url for $targetName")
                 Result.failure(e)
             }
         }
@@ -408,90 +315,253 @@ class LanzouCloudApi {
         }
     }
 
-    // === HTTP 工具方法 ===
+    // === 单文件下载直链解析（PAGE2） ===
 
-    private fun getBaseUrl(shareUrl: String): String {
-        val url = URL(shareUrl)
-        return "${url.protocol}://${url.host}"
+    private fun resolveSingleFile(
+        session: LanzouSession,
+        host: String,
+        entry: FileEntry,
+        shareUrl: String
+    ): String? {
+        val downloadPageUrl = "https://$host/${entry.id}"
+
+        // Python 版 PAGE2 使用独立新 Session（只带 headers，不带 PAGE1 的 cookie），
+        // 这里在解析每个文件前清空会话 cookie 以对齐
+        session.clearCookies()
+
+        // 进入下载页，提取 arg1 并生成 acw_sc__v2 cookie（含 path/expires），再访问一次拿真实内容
+        var dp = session.get(downloadPageUrl, referer = shareUrl)
+        val arg1 = Regex("""var\s+arg1\s*=\s*'([^']+)'""").find(dp)?.groupValues?.get(1)
+        if (arg1 != null) {
+            // 真实 JS：document.cookie = 'acw_sc__v2=...; path=/; expires=...'
+            session.setCookie("acw_sc__v2", generateAcwCookieV3(arg1))
+            session.setCookie("path", "/")
+            session.setCookie("expires", formatRfc1123(System.currentTimeMillis() + 3600_000L))
+            dp = session.get(downloadPageUrl, referer = downloadPageUrl)
+        }
+
+        // 提取下载按钮地址 /fn...
+        val fn = Regex("""src="(/fn[^"]+)"""").find(dp)?.groupValues?.get(1) ?: run {
+            Timber.w("Lanzou: no /fn found in download page for ${entry.name}")
+            return null
+        }
+        val buttonUrl = "https://$host$fn"
+        val buttonPage = session.get(buttonUrl, referer = downloadPageUrl)
+
+        // 提取 ajax 参数
+        val action = Regex("""'action':\s*'([^']+)'""").find(buttonPage)?.groupValues?.get(1)
+        val ajaxdata = Regex("""var\s+ajaxdata\s*=\s*'([^']+)';""").find(buttonPage)?.groupValues?.get(1)
+        val wpSign = Regex("""var\s+wp_sign\s*=\s*'([^']+)';""").find(buttonPage)?.groupValues?.get(1)
+        val websign = Regex("""'websign':\s*'([^']+)'""").find(buttonPage)?.groupValues?.get(1)
+        val ajaxUrl = Regex("""url\s*:\s*'(/ajaxm[^']+)'""").find(buttonPage)?.groupValues?.get(1)
+        if (action == null || ajaxdata == null || wpSign == null || websign == null || ajaxUrl == null) {
+            Timber.w("Lanzou: missing ajax params for ${entry.name}")
+            return null
+        }
+        val kdns = Regex("""var\s+kdns\s*=\s*(\d+);""").find(buttonPage)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        val ves = Regex("""'ves':\s*(\d+)""").find(buttonPage)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+
+        val ajaxForm = linkedMapOf<String, String>()
+        ajaxForm["action"] = action
+        ajaxForm["websignkey"] = ajaxdata
+        ajaxForm["signs"] = ajaxdata
+        ajaxForm["sign"] = wpSign
+        ajaxForm["websign"] = websign
+        ajaxForm["kd"] = kdns.toString()
+        ajaxForm["ves"] = ves.toString()
+
+        val dlJson = session.post("https://$host$ajaxUrl", ajaxForm, referer = buttonUrl)
+        // Python 版不校验 zt，直接取 url 字段拼直链；为空则失败
+        val dlObj = JSONObject(dlJson)
+        val urlPart = dlObj.optString("url")
+        if (urlPart.isBlank()) {
+            Timber.w("Lanzou: ajax failed for ${entry.name}: $dlJson")
+            return null
+        }
+        // Python 版：download_url = f"https://slssm.dmpdmp.com/file/{url}"（硬编码 CDN 域名，忽略 dom 字段）
+        return "https://slssm.dmpdmp.com/file/$urlPart"
     }
 
-    private fun fetchGet(
-        url: String,
-        referer: String?,
-        cookies: MutableMap<String, String>
-    ): String {
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            addRequestProperty("User-Agent", USER_AGENT)
-            addRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-            addRequestProperty("Accept-Language", "zh-CN,zh-HK;q=0.9,zh;q=0.8,en;q=0.7,en-GB;q=0.6,en-US;q=0.5")
-            addRequestProperty("Cache-Control", "max-age=0")
-            addRequestProperty("Connection", "keep-alive")
-            addRequestProperty("DNT", "1")
-            addRequestProperty("Upgrade-Insecure-Requests", "1")
-            referer?.let { addRequestProperty("Referer", it) }
-            if (cookies.isNotEmpty()) {
-                addRequestProperty("Cookie", cookies.entries.joinToString("; ") { "${it.key}=${it.value}" })
+    // === acw_sc__v2 cookie v3 算法 ===
+
+    /**
+     * 由下载页 `arg1`（40 位十六进制）生成 acw_sc__v2 cookie 值。
+     * 对齐 LanzouAPI api.py 的 ky()：按 order 表（1-based）重排 arg1，
+     * 每 2 个十六进制字符与 KEY 对应 2 字符做 XOR，得到 20 字节 hex。
+     */
+    private fun generateAcwCookieV3(arg1: String): String {
+        if (arg1.length < 40) {
+            Timber.w("Lanzou: arg1 too short (${arg1.length})")
+        }
+        val sb = StringBuilder(40)
+        for (pos in ACW_ORDER) {
+            if (pos - 1 < arg1.length) sb.append(arg1[pos - 1])
+        }
+        val reordered = sb.toString()
+        val result = StringBuilder(40)
+        for (i in 0 until 40 step 2) {
+            if (i + 1 >= reordered.length) break
+            val a = reordered.substring(i, i + 2).toIntOrNull(16) ?: 0
+            val b = ACW_KEY.substring(i, i + 2).toIntOrNull(16) ?: 0
+            result.append((a xor b).toString(16).padStart(2, '0'))
+        }
+        return result.toString()
+    }
+
+    // === RFC 1123 时间格式化（对齐真实 JS 的 toGMTString，expires 属性） ===
+
+    private fun formatRfc1123(epochMillis: Long): String {
+        val fmt = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US)
+        fmt.timeZone = TimeZone.getTimeZone("GMT")
+        return fmt.format(Date(epochMillis))
+    }
+
+    // === 分享页参数提取 ===
+
+    private data class IndexParams(
+        val lx: Int,
+        val up: Int,
+        val ls: Int,
+        val rep: String,
+        val t: String,
+        val k: String,
+        val fid: Int,
+        val uid: String,
+        val pgs: Int,
+        val puid: String
+    )
+
+    private fun extractIndexParams(html: String): IndexParams {
+        fun first(pattern: Regex): String =
+            pattern.find(html)?.groupValues?.get(1) ?: throw Exception("无法从分享页提取参数: $pattern")
+
+        val lx = first(Regex("""'lx':(\d+),""")).toInt()
+        val up = first(Regex("""'up':(\d+),""")).toInt()
+        val ls = first(Regex("""'ls':(\d+),""")).toInt()
+        // rep 可能为带引号字符串，去掉引号
+        val rep = first(Regex("""'rep':([^,]+),""")).trim('\'', '"', ' ')
+        // t 是变量名，真正的值形如 `xxx='12345'`
+        val tVar = first(Regex("""'t'\s*:\s*(\w+)"""))
+        val t = first(Regex("""$tVar\s*=\s*'(\d+)'"""))
+        // k 可能是变量名或直接 hex；没有时兜底 _h59t8
+        val k = try {
+            val kVar = first(Regex("""'k'\s*:\s*(\w+)"""))
+            first(Regex("""$kVar\s*=\s*'([a-f0-9]+)'"""))
+        } catch (e: Exception) {
+            try {
+                first(Regex("""var\s+_h59t8\s*=\s*'([a-f0-9]+)'""", RegexOption.IGNORE_CASE))
+            } catch (e2: Exception) {
+                Timber.w(e2, "Lanzou: cannot find k in index page")
+                ""
             }
-            connectTimeout = CONNECT_TIMEOUT
-            readTimeout = READ_TIMEOUT
-            instanceFollowRedirects = true
         }
+        val fid = first(Regex("""'fid':(\d+),""")).toInt()
+        val uid = first(Regex("""'uid':'([^']+)',"""))
+        val pgs = first(Regex("""pgs\s*=\s*(\d+);""")).toInt()
+        val puid = first(Regex("""'puid':'([^']+)',"""))
 
-        try {
-            val code = conn.responseCode
-            extractResponseCookies(conn, cookies)
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            return stream?.bufferedReader()?.use { it.readText() } ?: ""
-        } finally {
-            conn.disconnect()
-        }
+        return IndexParams(lx, up, ls, rep, t, k, fid, uid, pgs, puid)
     }
 
-    private fun fetchPost(
-        url: String,
-        body: String,
-        referer: String?,
-        cookies: MutableMap<String, String>
-    ): String {
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            addRequestProperty("User-Agent", USER_AGENT)
-            addRequestProperty("Accept", "application/json, text/javascript, */*")
-            addRequestProperty("Accept-Language", "zh-CN,zh-HK;q=0.9,zh;q=0.8,en;q=0.7,en-GB;q=0.6,en-US;q=0.5")
-            addRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-            addRequestProperty("X-Requested-With", "XMLHttpRequest")
-            addRequestProperty("Connection", "keep-alive")
-            addRequestProperty("DNT", "1")
-            referer?.let { addRequestProperty("Referer", it) }
-            if (cookies.isNotEmpty()) {
-                addRequestProperty("Cookie", cookies.entries.joinToString("; ") { "${it.key}=${it.value}" })
+    // === 简易 Cookie 会话 ===
+
+    private class LanzouSession {
+        val cookies = mutableMapOf<String, String>()
+        var lastHost: String? = null
+
+        fun setCookie(name: String, value: String) {
+            cookies[name] = value
+        }
+
+        /** 清空会话 cookie（对齐 Python 版 PAGE2 使用独立新 Session） */
+        fun clearCookies() {
+            cookies.clear()
+        }
+
+        /** 导出会话 Cookie 字符串（供直链下载使用） */
+        fun cookiesString(): String =
+            cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
+
+        fun get(url: String, referer: String? = null): String =
+            request("GET", url, null, referer)
+
+        fun post(url: String, form: Map<String, String>, referer: String? = null): String {
+            val body = form.entries.joinToString("&") { (key, value) ->
+                "${encode(key)}=${encode(value)}"
             }
-            connectTimeout = CONNECT_TIMEOUT
-            readTimeout = READ_TIMEOUT
-            instanceFollowRedirects = true
+            return request("POST", url, body, referer)
         }
 
-        try {
-            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            val code = conn.responseCode
-            extractResponseCookies(conn, cookies)
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            return stream?.bufferedReader()?.use { it.readText() } ?: ""
-        } finally {
-            conn.disconnect()
-        }
-    }
+        private fun encode(s: String): String =
+            URLEncoder.encode(s, StandardCharsets.UTF_8.name())
 
-    private fun extractResponseCookies(conn: HttpURLConnection, cookies: MutableMap<String, String>) {
-        val setCookies = conn.headerFields["Set-Cookie"] ?: return
-        for (item in setCookies) {
-            val cookie = item.substringBefore(";").trim()
-            val eq = cookie.indexOf('=')
-            if (eq > 0) {
-                cookies[cookie.substring(0, eq)] = cookie.substring(eq + 1)
+        private fun request(method: String, url: String, body: String?, referer: String?): String {
+            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                requestMethod = method
+                connectTimeout = CONNECT_TIMEOUT
+                readTimeout = READ_TIMEOUT
+                instanceFollowRedirects = true
+                addRequestProperty("User-Agent", USER_AGENT)
+                addRequestProperty(
+                    "Accept",
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+                )
+                addRequestProperty("Accept-Language", "zh-CN,zh-HK;q=0.9,zh;q=0.8,en;q=0.7")
+                // 蓝奏云 CDN（Tengine/ESA）对下载页、/fn 页强制返回 gzip（即使未请求也会压缩），
+                // 显式声明后由下面按 Content-Encoding 解压，避免正则匹配到压缩乱码
+                addRequestProperty("Accept-Encoding", "gzip, deflate")
+                if (referer != null) addRequestProperty("Referer", referer)
+                if (method == "POST") {
+                    doOutput = true
+                    addRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                    addRequestProperty("X-Requested-With", "XMLHttpRequest")
+                }
+                if (cookies.isNotEmpty()) {
+                    addRequestProperty(
+                        "Cookie",
+                        cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
+                    )
+                }
+            }
+
+            try {
+                if (method == "POST" && body != null) {
+                    conn.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
+                }
+                val code = conn.responseCode
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+
+                // 提取 Set-Cookie（可多个）
+                conn.headerFields?.forEach { (key, values) ->
+                    if (key != null && key.equals("Set-Cookie", ignoreCase = true)) {
+                        values.forEach { raw ->
+                            val kv = raw.substringBefore(';').trim()
+                            val idx = kv.indexOf('=')
+                            if (idx > 0) {
+                                cookies[kv.substring(0, idx).trim()] = kv.substring(idx + 1).trim()
+                            }
+                        }
+                    }
+                }
+                lastHost = conn.url.host
+
+                // 处理压缩响应：HttpURLConnection 不会自动解压 gzip/deflate，必须按 Content-Encoding 手动解压
+                val encoding = conn.getHeaderField("Content-Encoding")?.lowercase() ?: ""
+                val reader: BufferedReader = when {
+                    encoding.contains("gzip") -> GZIPInputStream(stream).bufferedReader(StandardCharsets.UTF_8)
+                    encoding.contains("deflate") -> InflaterInputStream(stream).bufferedReader(StandardCharsets.UTF_8)
+                    else -> stream.bufferedReader(StandardCharsets.UTF_8)
+                }
+                return reader.use { it.readText() }
+            } finally {
+                conn.disconnect()
             }
         }
     }
+
+    private data class FileEntry(
+        val id: String,
+        val name: String,
+        val size: String
+    )
 }
