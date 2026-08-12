@@ -2,9 +2,7 @@ package com.theveloper.pixelplay.data.github
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
-import timber.log.Timber
 import java.io.BufferedReader
 import java.net.HttpURLConnection
 import java.net.URL
@@ -18,17 +16,16 @@ import java.util.zip.GZIPInputStream
 import java.util.zip.InflaterInputStream
 
 /**
- * 蓝奏云直链解析 API
+ * 蓝奏云直链解析 API（Kotlin 转译版）
  *
- * 用于从蓝奏云分享链接获取真实下载 URL。
- * 对齐 LanzouAPI (api.py v2.0.2-beta2 / api.js v2.0.1，调用示例见 example.py) 最新算法：
- *   - acw_sc__v2 cookie v3：由下载页 `arg1`（40 位十六进制）按 order 表重排后与 KEY 逐字节 XOR 生成
- *   - filemoreajax.php 文件列表：POST 分享页参数获取文件清单（zt==1）
- *   - 逐文件走下载页（arg1 → cookie（含 path/expires）→ /fn → /ajaxm）拿到硬编码域名直链 `https://slssm.dmpdmp.com/file/{url}`
- *   - PAGE2 每个文件使用独立会话（清空 PAGE1 cookie），对齐 Python 版独立 Session
+ * 对齐 LanzouAPI 官方 Python 版 api.py v2.1.3（调用示例见 example.py）：
+ *   - acw_sc__v2 cookie v3：由页面 `arg1`（40 位十六进制）按 order 表重排后与 KEY 逐字节 XOR 生成
+ *   - PAGE1：分享页（被反爬拦截时先由 arg1 算 acw_sc__v2 重试）→ filemoreajax.php 拉取文件清单
+ *   - PAGE2：逐文件走下载页（arg1 → cookie（含 path/expires）→ /fn → /ajaxm）拿到硬编码域名直链 `https://slssm.dmpdmp.com/file/{url}`
+ *   - PAGE2 使用独立会话（不带 PAGE1 cookie），对齐 Python 版独立 Session
  *
  * 用法（对齐 example.py）：
- *   - getUrl(shareUrl, password, targetName)  → 精确指定文件名，返回单个直链
+ *   - getUrl(shareUrl, password, targetName)  → 精确指定文件名，返回直链与解析会话 cookies
  *   - resolveShare(shareUrl, password)        → 列出分享内全部文件
  */
 class LanzouCloudApi {
@@ -45,13 +42,36 @@ class LanzouCloudApi {
             0x7, 0x4, 0x11, 0x5, 0x3, 0x1c, 0x22, 0x25, 0xc, 0x24
         )
 
-        // UA（与参考 api.py 一致的 Edge 桌面 UA）
-        private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0"
+        // 与 api.py 一致的默认请求头（对齐 requests.Session.headers.update(headers)）
+        private val DEFAULT_HEADERS = linkedMapOf(
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept-Encoding" to "gzip, deflate, br, zstd",
+            "Accept-Language" to "zh-CN,zh-HK;q=0.9,zh;q=0.8,en;q=0.7,en-GB;q=0.6,en-US;q=0.5",
+            "Cache-Control" to "max-age=0",
+            "Connection" to "keep-alive",
+            "DNT" to "1",
+            "Sec-Fetch-Dest" to "document",
+            "Sec-Fetch-Mode" to "navigate",
+            "Sec-Fetch-Site" to "same-origin",
+            "Sec-Fetch-User" to "?1",
+            "Upgrade-Insecure-Requests" to "1",
+            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+            "sec-ch-ua" to "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\", \"Microsoft Edge\";v=\"150\"",
+            "sec-ch-ua-mobile" to "?0",
+            "sec-ch-ua-platform" to "\"Windows\"",
+            "sec-gpc" to "1"
+        )
 
         // 请求超时
         private const val CONNECT_TIMEOUT = 15000
         private const val READ_TIMEOUT = 20000
     }
+
+    /** 下载信息（对齐 api.py 返回的 {"download_url":..., "cookies":...}） */
+    data class LanzouDownloadInfo(
+        val downloadUrl: String,
+        val cookies: Map<String, String>
+    )
 
     data class LanzouFileInfo(
         val fileName: String,
@@ -77,20 +97,21 @@ class LanzouCloudApi {
     }
 
     /**
-     * 解析蓝奏云分享链接，获取所有文件的下载信息
+     * 精确获取指定文件名的直链（对齐 example.py 的 get_url(share_url, password, target_name)）
      *
      * @param shareUrl 分享链接（如 https://wwbvc.lanzouv.com/b011m9azlg）
      * @param password 提取密码（可选）
-     * @return 文件信息列表
+     * @param targetName 目标文件名（如 "PixelPlay-1.3.2-32-20260731-release.apk"）
+     * @return 该文件的真实下载直链与解析会话 cookies；未找到目标文件时返回失败（附可用文件清单）
      */
-    suspend fun resolveShare(
+    suspend fun getUrl(
         shareUrl: String,
-        password: String? = null
-    ): Result<List<LanzouFileInfo>> {
+        password: String? = null,
+        targetName: String
+    ): Result<LanzouDownloadInfo> {
         return withContext(Dispatchers.IO) {
             try {
                 val session = LanzouSession()
-                val files = mutableListOf<LanzouFileInfo>()
 
                 // ── PAGE1：进入分享页，提取文件列表参数 ──
                 var indexHtml = session.get(shareUrl, referer = shareUrl)
@@ -109,7 +130,7 @@ class LanzouCloudApi {
                 val host = session.lastHost ?: URL(shareUrl).host
                 val params = extractIndexParams(indexHtml)
 
-                // 拉取文件列表
+                // 构造文件列表请求参数（对齐 api.py params）
                 val listForm = linkedMapOf<String, String>()
                 listForm["lx"] = params.lx.toString()
                 listForm["fid"] = params.fid.toString()
@@ -130,108 +151,9 @@ class LanzouCloudApi {
                 )
                 val listObj = JSONObject(listJson)
                 if (listObj.optInt("zt") != 1) {
-                    throw Exception("获取文件列表失败: ${listObj.optString("info", listJson)}")
+                    throw Exception("Failed to obtain the file list: ${listObj.optString("info", listJson)}")
                 }
-                val text = listObj.optJSONArray("text") ?: JSONArray()
-                val fileEntries = mutableListOf<FileEntry>()
-                for (i in 0 until text.length()) {
-                    val item = text.optJSONObject(i) ?: continue
-                    fileEntries.add(
-                        FileEntry(
-                            id = item.optString("id"),
-                            name = item.optString("name_all"),
-                            size = item.optString("size")
-                        )
-                    )
-                }
-                Timber.d("Lanzou: found ${fileEntries.size} files")
-
-                // ── PAGE2：逐文件解析真实下载直链 ──
-                for (entry in fileEntries) {
-                    try {
-                        val downloadUrl = resolveSingleFile(session, host, entry, shareUrl)
-                        if (downloadUrl != null) {
-                            files.add(
-                                LanzouFileInfo(
-                                    fileName = entry.name,
-                                    fileSize = entry.size,
-                                    downloadUrl = downloadUrl,
-                                    versionName = parseVersionFromFileName(entry.name),
-                                    // ⚡ 携带解析会话的 Cookie 与 Referer，App 内下载直链时带上，
-                                    //    否则蓝奏云 CDN 直接返回人机验证 HTML 页导致下载失败
-                                    cookie = session.cookiesString(),
-                                    referer = shareUrl
-                                )
-                            )
-                        }
-                    } catch (e: Exception) {
-                        Timber.w(e, "Lanzou: failed to resolve file: ${entry.name}")
-                    }
-                }
-
-                Result.success(files)
-            } catch (e: Exception) {
-                Timber.e(e, "Lanzou: failed to resolve share")
-                Result.failure(e)
-            }
-        }
-    }
-
-    /**
-     * 精确获取指定文件名的直链（对齐 example.py 的 get_url(share_url, password, target_name)）
-     *
-     * @param shareUrl 分享链接（如 https://wwbvc.lanzouv.com/b011m9azlg）
-     * @param password 提取密码（可选）
-     * @param targetName 目标文件名（如 "PixelPlay-1.3.2-32-20260731-release.apk"）
-     * @return 该文件的真实下载直链；未找到目标文件时返回失败（附可用文件清单）
-     */
-    suspend fun getUrl(
-        shareUrl: String,
-        password: String? = null,
-        targetName: String
-    ): Result<String> {
-        return withContext(Dispatchers.IO) {
-            try {
-                val session = LanzouSession()
-
-                // ── PAGE1：进入分享页，提取文件列表参数 ──
-                var indexHtml = session.get(shareUrl, referer = shareUrl)
-                if (!indexHtml.contains("'lx'")) {
-                    val arg1 = Regex("""var\s+arg1\s*=\s*'([^']+)'""")
-                        .find(indexHtml)?.groupValues?.get(1)
-                    if (arg1 != null) {
-                        session.setCookie("acw_sc__v2", generateAcwCookieV3(arg1))
-                        session.setCookie("path", "/")
-                        indexHtml = session.get(shareUrl, referer = shareUrl)
-                    }
-                }
-
-                val host = session.lastHost ?: URL(shareUrl).host
-                val params = extractIndexParams(indexHtml)
-
-                val listForm = linkedMapOf<String, String>()
-                listForm["lx"] = params.lx.toString()
-                listForm["fid"] = params.fid.toString()
-                listForm["uid"] = params.uid
-                listForm["puid"] = params.puid
-                listForm["pg"] = params.pgs.toString()
-                listForm["rep"] = params.rep
-                listForm["t"] = params.t
-                listForm["k"] = params.k
-                listForm["up"] = params.up.toString()
-                listForm["ls"] = params.ls.toString()
-                if (!password.isNullOrEmpty()) listForm["pwd"] = password
-
-                val listJson = session.post(
-                    "https://$host/filemoreajax.php?file=${params.fid}",
-                    listForm,
-                    referer = shareUrl
-                )
-                val listObj = JSONObject(listJson)
-                if (listObj.optInt("zt") != 1) {
-                    throw Exception("获取文件列表失败: ${listObj.optString("info", listJson)}")
-                }
-                val text = listObj.optJSONArray("text") ?: JSONArray()
+                val text = listObj.optJSONArray("text") ?: org.json.JSONArray()
                 val fileEntries = mutableListOf<FileEntry>()
                 for (i in 0 until text.length()) {
                     val item = text.optJSONObject(i) ?: continue
@@ -252,13 +174,106 @@ class LanzouCloudApi {
                 }
 
                 // ── PAGE2：独立会话解析目标文件直链 ──
-                val downloadUrl = resolveSingleFile(session, host, target, shareUrl)
-                if (downloadUrl == null) {
-                    throw Exception("无法解析目标文件下载直链: $targetName")
-                }
-                Result.success(downloadUrl)
+                val info = resolveSingleFile(session, host, target, shareUrl)
+                    ?: throw Exception("无法解析目标文件下载直链: $targetName")
+                Result.success(info)
             } catch (e: Exception) {
-                Timber.e(e, "Lanzou: failed to get url for $targetName")
+                Result.failure(e)
+            }
+        }
+    }
+
+    /**
+     * 解析蓝奏云分享链接，获取所有文件的下载信息
+     *
+     * @param shareUrl 分享链接（如 https://wwbvc.lanzouv.com/b011m9azlg）
+     * @param password 提取密码（可选）
+     * @return 文件信息列表
+     */
+    suspend fun resolveShare(
+        shareUrl: String,
+        password: String? = null
+    ): Result<List<LanzouFileInfo>> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val session = LanzouSession()
+                val files = mutableListOf<LanzouFileInfo>()
+
+                // ── PAGE1：进入分享页，提取文件列表参数 ──
+                var indexHtml = session.get(shareUrl, referer = shareUrl)
+                if (!indexHtml.contains("'lx'")) {
+                    val arg1 = Regex("""var\s+arg1\s*=\s*'([^']+)'""")
+                        .find(indexHtml)?.groupValues?.get(1)
+                    if (arg1 != null) {
+                        session.setCookie("acw_sc__v2", generateAcwCookieV3(arg1))
+                        session.setCookie("path", "/")
+                        indexHtml = session.get(shareUrl, referer = shareUrl)
+                    }
+                }
+
+                val host = session.lastHost ?: URL(shareUrl).host
+                val params = extractIndexParams(indexHtml)
+
+                val listForm = linkedMapOf<String, String>()
+                listForm["lx"] = params.lx.toString()
+                listForm["fid"] = params.fid.toString()
+                listForm["uid"] = params.uid
+                listForm["puid"] = params.puid
+                listForm["pg"] = params.pgs.toString()
+                listForm["rep"] = params.rep
+                listForm["t"] = params.t
+                listForm["k"] = params.k
+                listForm["up"] = params.up.toString()
+                listForm["ls"] = params.ls.toString()
+                if (!password.isNullOrEmpty()) listForm["pwd"] = password
+
+                val listJson = session.post(
+                    "https://$host/filemoreajax.php?file=${params.fid}",
+                    listForm,
+                    referer = shareUrl
+                )
+                val listObj = JSONObject(listJson)
+                if (listObj.optInt("zt") != 1) {
+                    throw Exception("Failed to obtain the file list: ${listObj.optString("info", listJson)}")
+                }
+                val text = listObj.optJSONArray("text") ?: org.json.JSONArray()
+                val fileEntries = mutableListOf<FileEntry>()
+                for (i in 0 until text.length()) {
+                    val item = text.optJSONObject(i) ?: continue
+                    fileEntries.add(
+                        FileEntry(
+                            id = item.optString("id"),
+                            name = item.optString("name_all"),
+                            size = item.optString("size")
+                        )
+                    )
+                }
+
+                // ── PAGE2：逐文件解析真实下载直链 ──
+                for (entry in fileEntries) {
+                    try {
+                        val info = resolveSingleFile(session, host, entry, shareUrl)
+                        if (info != null) {
+                            files.add(
+                                LanzouFileInfo(
+                                    fileName = entry.name,
+                                    fileSize = entry.size,
+                                    downloadUrl = info.downloadUrl,
+                                    versionName = parseVersionFromFileName(entry.name),
+                                    // 携带解析会话的 Cookie 与 Referer，App 内下载直链时带上，
+                                    // 否则蓝奏云 CDN 直接返回人机验证 HTML 页导致下载失败
+                                    cookie = info.cookies.joinToString("; ") { "${it.key}=${it.value}" },
+                                    referer = shareUrl
+                                )
+                            )
+                        }
+                    } catch (e: Exception) {
+                        // 单个文件解析失败不中断整体流程
+                    }
+                }
+
+                Result.success(files)
+            } catch (e: Exception) {
                 Result.failure(e)
             }
         }
@@ -291,7 +306,6 @@ class LanzouCloudApi {
                 if (matched.isNotEmpty()) {
                     matched
                 } else {
-                    Timber.w("蓝奏云中未找到版本号 $targetVersion 的文件，返回所有文件")
                     files
                 }
             } else {
@@ -317,12 +331,19 @@ class LanzouCloudApi {
 
     // === 单文件下载直链解析（PAGE2） ===
 
+    /**
+     * 解析单个文件的下载直链，返回下载信息（直链 + 解析会话 cookies）。
+     *
+     * 对齐 api.py PAGE2：使用独立会话（不带 PAGE1 的 cookie）：
+     *   - 进入下载页提取 arg1，生成 acw_sc__v2 cookie（含 path/expires）后再访问一次拿真实内容
+     *   - 提取下载按钮地址 /fn，进入后提取 ajax 参数，POST /ajaxm 拿到硬编码域名直链
+     */
     private fun resolveSingleFile(
         session: LanzouSession,
         host: String,
         entry: FileEntry,
         shareUrl: String
-    ): String? {
+    ): LanzouDownloadInfo? {
         val downloadPageUrl = "https://$host/${entry.id}"
 
         // Python 版 PAGE2 使用独立新 Session（只带 headers，不带 PAGE1 的 cookie），
@@ -334,17 +355,19 @@ class LanzouCloudApi {
         val arg1 = Regex("""var\s+arg1\s*=\s*'([^']+)'""").find(dp)?.groupValues?.get(1)
         if (arg1 != null) {
             // 真实 JS：document.cookie = 'acw_sc__v2=...; path=/; expires=...'
-            session.setCookie("acw_sc__v2", generateAcwCookieV3(arg1))
-            session.setCookie("path", "/")
-            session.setCookie("expires", formatRfc1123(System.currentTimeMillis() + 3600_000L))
+            val acwCookie = generateAcwCookieV3(arg1)
+            val expires = formatRfc1123(System.currentTimeMillis() + 3600_000L)
+            val dlCookies = linkedMapOf(
+                "acw_sc__v2" to acwCookie,
+                "path" to "/",
+                "expires" to expires
+            )
+            session.updateCookies(dlCookies)
             dp = session.get(downloadPageUrl, referer = downloadPageUrl)
         }
 
         // 提取下载按钮地址 /fn...
-        val fn = Regex("""src="(/fn[^"]+)"""").find(dp)?.groupValues?.get(1) ?: run {
-            Timber.w("Lanzou: no /fn found in download page for ${entry.name}")
-            return null
-        }
+        val fn = Regex("""src="(/fn[^"]+)"""").find(dp)?.groupValues?.get(1) ?: return null
         val buttonUrl = "https://$host$fn"
         val buttonPage = session.get(buttonUrl, referer = downloadPageUrl)
 
@@ -355,12 +378,12 @@ class LanzouCloudApi {
         val websign = Regex("""'websign':\s*'([^']+)'""").find(buttonPage)?.groupValues?.get(1)
         val ajaxUrl = Regex("""url\s*:\s*'(/ajaxm[^']+)'""").find(buttonPage)?.groupValues?.get(1)
         if (action == null || ajaxdata == null || wpSign == null || websign == null || ajaxUrl == null) {
-            Timber.w("Lanzou: missing ajax params for ${entry.name}")
             return null
         }
         val kdns = Regex("""var\s+kdns\s*=\s*(\d+);""").find(buttonPage)?.groupValues?.get(1)?.toIntOrNull() ?: 0
         val ves = Regex("""'ves':\s*(\d+)""").find(buttonPage)?.groupValues?.get(1)?.toIntOrNull() ?: 0
 
+        // 对齐 api.py json_data（实际以 form 提交）
         val ajaxForm = linkedMapOf<String, String>()
         ajaxForm["action"] = action
         ajaxForm["websignkey"] = ajaxdata
@@ -374,24 +397,24 @@ class LanzouCloudApi {
         // Python 版不校验 zt，直接取 url 字段拼直链；为空则失败
         val dlObj = JSONObject(dlJson)
         val urlPart = dlObj.optString("url")
-        if (urlPart.isBlank()) {
-            Timber.w("Lanzou: ajax failed for ${entry.name}: $dlJson")
-            return null
-        }
+        if (urlPart.isBlank()) return null
         // Python 版：download_url = f"https://slssm.dmpdmp.com/file/{url}"（硬编码 CDN 域名，忽略 dom 字段）
-        return "https://slssm.dmpdmp.com/file/$urlPart"
+        return LanzouDownloadInfo(
+            downloadUrl = "https://slssm.dmpdmp.com/file/$urlPart",
+            cookies = session.cookies.toMap()
+        )
     }
 
-    // === acw_sc__v2 cookie v3 算法 ===
+    // === acw_sc__v2 cookie v3 算法（对齐 api.py 的 ky()） ===
 
     /**
-     * 由下载页 `arg1`（40 位十六进制）生成 acw_sc__v2 cookie 值。
+     * 由页面 `arg1`（40 位十六进制）生成 acw_sc__v2 cookie 值。
      * 对齐 LanzouAPI api.py 的 ky()：按 order 表（1-based）重排 arg1，
      * 每 2 个十六进制字符与 KEY 对应 2 字符做 XOR，得到 20 字节 hex。
      */
     private fun generateAcwCookieV3(arg1: String): String {
         if (arg1.length < 40) {
-            Timber.w("Lanzou: arg1 too short (${arg1.length})")
+            // arg1 too short
         }
         val sb = StringBuilder(40)
         for (pos in ACW_ORDER) {
@@ -438,7 +461,7 @@ class LanzouCloudApi {
         val lx = first(Regex("""'lx':(\d+),""")).toInt()
         val up = first(Regex("""'up':(\d+),""")).toInt()
         val ls = first(Regex("""'ls':(\d+),""")).toInt()
-        // rep 可能为带引号字符串，去掉引号
+        // rep 可能为带引号字符串，去掉引号（对齐 api.py 直接取值）
         val rep = first(Regex("""'rep':([^,]+),""")).trim('\'', '"', ' ')
         // t 是变量名，真正的值形如 `xxx='12345'`
         val tVar = first(Regex("""'t'\s*:\s*(\w+)"""))
@@ -451,7 +474,6 @@ class LanzouCloudApi {
             try {
                 first(Regex("""var\s+_h59t8\s*=\s*'([a-f0-9]+)'""", RegexOption.IGNORE_CASE))
             } catch (e2: Exception) {
-                Timber.w(e2, "Lanzou: cannot find k in index page")
                 ""
             }
         }
@@ -463,7 +485,7 @@ class LanzouCloudApi {
         return IndexParams(lx, up, ls, rep, t, k, fid, uid, pgs, puid)
     }
 
-    // === 简易 Cookie 会话 ===
+    // === 简易 Cookie 会话（对齐 requests.Session） ===
 
     private class LanzouSession {
         val cookies = mutableMapOf<String, String>()
@@ -471,6 +493,10 @@ class LanzouCloudApi {
 
         fun setCookie(name: String, value: String) {
             cookies[name] = value
+        }
+
+        fun updateCookies(values: Map<String, String>) {
+            cookies.putAll(values)
         }
 
         /** 清空会话 cookie（对齐 Python 版 PAGE2 使用独立新 Session） */
@@ -501,23 +527,15 @@ class LanzouCloudApi {
                 connectTimeout = CONNECT_TIMEOUT
                 readTimeout = READ_TIMEOUT
                 instanceFollowRedirects = true
-                addRequestProperty("User-Agent", USER_AGENT)
-                addRequestProperty(
-                    "Accept",
-                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
-                )
-                addRequestProperty("Accept-Language", "zh-CN,zh-HK;q=0.9,zh;q=0.8,en;q=0.7")
-                // 蓝奏云 CDN（Tengine/ESA）对下载页、/fn 页强制返回 gzip（即使未请求也会压缩），
-                // 显式声明后由下面按 Content-Encoding 解压，避免正则匹配到压缩乱码
-                addRequestProperty("Accept-Encoding", "gzip, deflate")
-                if (referer != null) addRequestProperty("Referer", referer)
+                // 默认请求头（对齐 requests.Session.headers.update(headers)）
+                DEFAULT_HEADERS.forEach { (k, v) -> setRequestProperty(k, v) }
+                if (referer != null) setRequestProperty("Referer", referer)
                 if (method == "POST") {
                     doOutput = true
-                    addRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-                    addRequestProperty("X-Requested-With", "XMLHttpRequest")
+                    setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
                 }
                 if (cookies.isNotEmpty()) {
-                    addRequestProperty(
+                    setRequestProperty(
                         "Cookie",
                         cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
                     )
