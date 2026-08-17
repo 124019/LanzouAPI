@@ -1,21 +1,4 @@
-特别说明：本文中存在以中、英文两种语言。若两种文本存在任何歧义或不一致之处，应以英文版本为准。
-Governing Language: This statement is made available in both Chinese and English. In the event of any ambiguity or inconsistency between the two versions, the English version shall prevail.
-
-本项目遵循双重许可声明
-
-1. 开源或非商业用途：若您以开源或非商业目的使用本软件，则必须遵守自由软件基金会发布的 GNU 宽通用公共许可证第 2.1 版本（LGPLv2.1）的全部条款。下文附有 LGPLv2.1 协议全文。
-2. 商业用途或其他不符合 LGPLv2.1 条款的使用：若您的使用情形属于商业用途，或虽非商业但不符合 LGPLv2.1 之适用条件，或您需要获得额外权利，则须另行取得商业许可。请通过邮箱 oyzh124019@qq.com 联系权利人BefidcOZ(GitHub@124019）获取商业授权。取得商业授权后，被许可人将不再受 LGPLv2.1 约束，转而适用另行提供的商业授权许可协议(Commercial License Agreement), 在 LGPLv2.1 协议以下另附有商业授权许可协议全文。
-
-This software is dual-licensed.
-
-1. For Open-Source or Non-Commercial Use: 
-If you use this software for open-source or non-commercial purposes, you must do so under the terms and conditions of the GNU Lesser General Public License version 2.1 (LGPLv2.1) as published by the Free Software Foundation. The full text of the LGPLv2.1 is reproduced below.
-
-2. For Commercial Use or Other Use Not Complying with LGPLv2.1: 
-If your use is commercial, or if it does not fall within the permissible scope of LGPLv2.1, or if you require additional rights beyond those granted by LGPLv2.1, you must obtain a separate commercial license. Please contact the right holder BefidcOZ(GitHub@124019) at oyzh124019@qq.com to acquire such license. Upon obtaining a commercial license, the licensee shall no longer be bound by LGPLv2.1 and shall instead be governed by the Commercial License Agreement, the full text of the Commercial License Agreement is reproduced below the text of LGPLv2.1.
-
---- Below is the complete text of the GNU LGPL v2.1 license  以下为完整的 GNU LGPL v2.1 协议文本 ---
-                   GNU LESSER GENERAL PUBLIC LICENSE
+                  GNU LESSER GENERAL PUBLIC LICENSE
                        Version 2.1, February 1999
 
  Copyright (C) 1991, 1999 Free Software Foundation, Inc.
@@ -519,38 +502,3 @@ necessary.  Here is a sample; alter the names:
   Ty Coon, President of Vice
 
 That's all there is to it!
-
-
---- Below is the complete text of the Commercial License Agreement 以下为完整的商业授权许可协议文本 ---
-商业授权许可协议
-版权所有 © 2026 BefidcOZ（GitHub@124019）
-
-第1条 授权
-本协议特此授予已取得本软件及其相关文档文件（合称“本软件”）商业授权的任何主体（下称“被许可人”）以下权利：使用、复制、修改、合并、发布、分发及/或销售本软件的副本，但前述权利的行使须受限于本协议第2条所列条件。
-
-第2条 条件
-2.1 上述版权声明及本许可声明应包含在本软件的所有副本或实质性部分中。
-2.2 除本协议明确授予的权利外，被许可人不享有任何其他权利；任何未经本协议明确许可的使用，均须事先取得版权持有人的书面同意。
-
-第3条 免责声明
-本软件按“现状”提供，不附带任何明示或暗示的保证，包括但不限于关于适销性、特定用途适用性及不侵犯任何第三方权利的保证。
-
-第4条 责任限制
-在任何情况下，作者或版权持有人均不对任何索赔、损害赔偿或其他责任（无论基于合同、侵权或其他法律理论）承担责任，该等责任系因使用、处理本软件或与本软件相关之任何行为所引起或与之有关，即使其已被告知可能发生此类损害。
-
-The Commercial License Agreement
-Copyright © 2026 BefidcOZ (GitHub@124019)
-
-1. Grant of License
-Permission is hereby granted to any person who has obtained a commercial license for this software and associated documentation files (the “Software”), to use, copy, modify, merge, publish, distribute, and/or sell copies of the Software, subject to the conditions set forth in Section 2 below.
-
-2. Conditions
-2.1 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-2.2 Except for the rights expressly granted under this Agreement, the Licensee is not granted any other rights. Any use not expressly permitted by this Agreement shall require the prior written consent of the copyright holder.
-
-3. Disclaimer of Warranty
-THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-
-4. Limitation of Liability
-IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
