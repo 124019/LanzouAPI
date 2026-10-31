@@ -1,5 +1,6 @@
-/.venv/
-/.vscode/
-/tests/
+/.venv
+/.vscode
+/tests
 /.idea
-/__pycache__/
+/__pycache__
+/node_modules
